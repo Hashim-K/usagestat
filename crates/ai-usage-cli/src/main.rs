@@ -27,7 +27,18 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     List,
-    Probe { provider_ids: Vec<String> },
+    Probe {
+        provider_ids: Vec<String>,
+    },
+    Plugin {
+        #[command(subcommand)]
+        command: PluginCommand,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PluginCommand {
+    Validate,
 }
 
 fn main() -> Result<()> {
@@ -66,6 +77,19 @@ fn main() -> Result<()> {
                     for metric in snapshot.metrics {
                         println!("  {metric:?}");
                     }
+                }
+            }
+        }
+        Command::Plugin {
+            command: PluginCommand::Validate,
+        } => {
+            let summaries = provider_summaries(&providers, &config);
+            if cli.json {
+                println!("{}", serde_json::to_string_pretty(&summaries)?);
+            } else {
+                println!("validated {} plugin(s)", summaries.len());
+                for summary in summaries {
+                    println!("{}\t{}", summary.id, summary.name);
                 }
             }
         }

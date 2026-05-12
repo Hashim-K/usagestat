@@ -15,6 +15,7 @@ contracts:
 ```bash
 cargo run -p ai-usage-cli -- list
 cargo run -p ai-usage-cli -- --json probe mock
+cargo run -p ai-usage-cli -- plugin validate
 cargo run -p ai-usage-daemon
 curl http://127.0.0.1:6736/v1/usage
 ```
