@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "warp",
+  "name": "Warp",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#01A4FF",
+  "links": [
+    { "label": "API Keys", "url": "https://docs.warp.dev/reference/cli/api-keys" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Usage", "scope": "detail" },
+    { "type": "text", "label": "Bonus", "scope": "detail" }
+  ]
+}
