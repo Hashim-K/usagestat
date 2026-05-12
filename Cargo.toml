@@ -23,5 +23,7 @@ reqwest = { version = "0.13", features = ["blocking", "json", "socks"] }
 rquickjs = "0.11"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+signal-hook = "0.3"
+tabled = { version = "0.17", features = ["std"] }
 thiserror = "2"
 toml = "0.8"
