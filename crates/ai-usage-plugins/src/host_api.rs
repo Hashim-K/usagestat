@@ -54,6 +54,7 @@ pub fn inject<'js>(
     inject_http(ctx, &host)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
+    inject_utils(ctx)?;
     Ok(())
 }
 
@@ -130,6 +131,23 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     )?;
 
     fs_obj.set(
+        "writeText",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, path: String, content: String| -> rquickjs::Result<()> {
+                let path = expand_path(&path);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|error| {
+                        Exception::throw_message(&ctx_inner, &error.to_string())
+                    })?;
+                }
+                std::fs::write(&path, content)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
+            },
+        )?,
+    )?;
+
+    fs_obj.set(
         "listDir",
         Function::new(
             ctx.clone(),
@@ -192,6 +210,106 @@ fn patch_http_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     timeoutMs: req.timeoutMs || 10000
                 }));
                 return JSON.parse(response);
+            };
+        })();
+        "#
+        .as_bytes(),
+    )
+}
+
+fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            var ctx = __ai_usage_ctx;
+
+            ctx.line = {
+                text: function(opts) {
+                    var line = { type: "text", label: opts.label, value: opts.value };
+                    if (opts.color) line.color = opts.color;
+                    if (opts.subtitle) line.subtitle = opts.subtitle;
+                    return line;
+                },
+                badge: function(opts) {
+                    var line = { type: "badge", label: opts.label, text: opts.text };
+                    if (opts.color) line.color = opts.color;
+                    if (opts.subtitle) line.subtitle = opts.subtitle;
+                    return line;
+                },
+                progress: function(opts) {
+                    var line = {
+                        type: "progress",
+                        label: opts.label,
+                        used: opts.used,
+                        limit: opts.limit,
+                        format: opts.format || { kind: "percent" }
+                    };
+                    if (opts.resetsAt) line.resetsAt = opts.resetsAt;
+                    if (opts.periodDurationMs) line.periodDurationMs = opts.periodDurationMs;
+                    if (opts.color) line.color = opts.color;
+                    return line;
+                }
+            };
+
+            ctx.util = {
+                tryParseJson: function(text) {
+                    try { return JSON.parse(text); } catch (_) { return null; }
+                },
+                request: function(req) {
+                    return ctx.host.http.request(req);
+                },
+                requestJson: function(req) {
+                    var resp = ctx.host.http.request(req);
+                    var json = null;
+                    try { json = resp.bodyText ? JSON.parse(resp.bodyText) : null; } catch (_) {}
+                    return { resp: resp, json: json };
+                },
+                isAuthStatus: function(status) {
+                    return status === 401 || status === 403;
+                },
+                parseDateMs: function(value) {
+                    var ms = Date.parse(value);
+                    return Number.isFinite(ms) ? ms : null;
+                },
+                toIso: function(value) {
+                    if (value === null || value === undefined) return null;
+                    var n = Number(value);
+                    if (!Number.isFinite(n)) return null;
+                    return new Date(n).toISOString();
+                },
+                retryOnceOnAuth: function(opts) {
+                    var first = opts.request(null);
+                    if (!ctx.util.isAuthStatus(first.status)) return first;
+                    var refreshed = opts.refresh();
+                    if (!refreshed) return first;
+                    return opts.request(refreshed);
+                }
+            };
+
+            ctx.fmt = {
+                planLabel: function(value) {
+                    var text = String(value || "").trim();
+                    if (!text) return "";
+                    text = text.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+                    return text.replace(/(^|\s)([a-z])/g, function(match, space, letter) {
+                        return space + letter.toUpperCase();
+                    });
+                }
+            };
+
+            ctx.jwt = {
+                decodePayload: function(token) {
+                    if (typeof token !== "string") return null;
+                    var parts = token.split(".");
+                    if (parts.length < 2) return null;
+                    var b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+                    while (b64.length % 4) b64 += "=";
+                    try {
+                        return JSON.parse(atob(b64));
+                    } catch (_) {
+                        return null;
+                    }
+                }
             };
         })();
         "#

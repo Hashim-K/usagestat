@@ -40,7 +40,8 @@ fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider) -> Result<UsageSnapsh
     let globals = ctx.globals();
     let plugin_obj: Object = globals
         .get("__ai_usage_plugin")
-        .map_err(|_| "missing __ai_usage_plugin".to_string())?;
+        .or_else(|_| globals.get("__openusage_plugin"))
+        .map_err(|_| "missing plugin export".to_string())?;
     let probe_fn: rquickjs::Function = plugin_obj
         .get("probe")
         .map_err(|_| "missing probe()".to_string())?;
@@ -100,6 +101,7 @@ fn inject_context(ctx: &Ctx<'_>, plugin_id: &str) -> rquickjs::Result<()> {
 fn parse_metrics(result: &Object<'_>) -> Result<Vec<MetricLine>, String> {
     let lines: Array = result
         .get("metrics")
+        .or_else(|_| result.get("lines"))
         .map_err(|_| "missing metrics".to_string())?;
     let mut out = Vec::new();
 

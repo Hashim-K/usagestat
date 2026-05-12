@@ -30,6 +30,7 @@ Bundled providers:
 
 - `mock`: development fixture.
 - `host-smoke`: disabled fixture for host API checks.
+- `gemini`: Gemini CLI OAuth quota.
 - `openrouter`: OpenRouter API credits via `OPENROUTER_API_KEY`.
 
 ## Config
