@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "crof",
+  "name": "Crof",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#0EA5E9",
+  "links": [
+    { "label": "Dashboard", "url": "https://crof.ai" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Requests", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Credits", "scope": "detail" }
+  ]
+}
