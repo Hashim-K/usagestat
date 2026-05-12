@@ -1,5 +1,5 @@
 use crate::host_api;
-use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, UsageSnapshot};
+use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, UsageSnapshot, paths};
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
 
@@ -89,6 +89,14 @@ fn inject_context(ctx: &Ctx<'_>, plugin_id: &str) -> rquickjs::Result<()> {
     let app = Object::new(ctx.clone())?;
     app.set("version", env!("CARGO_PKG_VERSION"))?;
     app.set("platform", std::env::consts::OS)?;
+    let app_data_dir = paths::data_dir();
+    let plugin_data_dir = app_data_dir.join("plugins").join(plugin_id);
+    let _ = std::fs::create_dir_all(&plugin_data_dir);
+    app.set("appDataDir", app_data_dir.to_string_lossy().to_string())?;
+    app.set(
+        "pluginDataDir",
+        plugin_data_dir.to_string_lossy().to_string(),
+    )?;
 
     let probe_ctx = Object::new(ctx.clone())?;
     probe_ctx.set("nowIso", Utc::now().to_rfc3339())?;

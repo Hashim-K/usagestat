@@ -30,6 +30,7 @@ Bundled providers:
 
 - `mock`: development fixture.
 - `host-smoke`: disabled fixture for host API checks.
+- `copilot`: GitHub Copilot usage via `COPILOT_API_TOKEN`, `GITHUB_TOKEN`, or `GH_TOKEN`.
 - `gemini`: Gemini CLI OAuth quota.
 - `openrouter`: OpenRouter API credits via `OPENROUTER_API_KEY`.
 
