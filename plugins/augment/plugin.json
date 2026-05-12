@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "augment",
+  "name": "Augment",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF5C00",
+  "links": [
+    { "label": "Account", "url": "https://app.augmentcode.com/account" },
+    { "label": "Status", "url": "https://status.augmentcode.com" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
+  ]
+}
