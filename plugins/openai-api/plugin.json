@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "openai-api",
+  "name": "OpenAI API",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#10a37f",
+  "links": [
+    { "label": "Usage", "url": "https://platform.openai.com/usage" },
+    { "label": "Status", "url": "https://status.openai.com" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Available", "scope": "detail" }
+  ]
+}
