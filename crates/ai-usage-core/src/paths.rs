@@ -18,6 +18,10 @@ pub fn config_file() -> PathBuf {
     config_dir().join("config.toml")
 }
 
+pub fn cache_file() -> PathBuf {
+    data_dir().join("snapshots.json")
+}
+
 pub fn default_plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 

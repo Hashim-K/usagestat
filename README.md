@@ -33,6 +33,12 @@ Default config path:
 ~/.config/ai-usage/config.toml
 ```
 
+Default cache path:
+
+```text
+~/.local/share/ai-usage/snapshots.json
+```
+
 Example:
 
 ```toml

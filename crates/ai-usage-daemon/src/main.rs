@@ -40,9 +40,21 @@ fn main() -> Result<()> {
         .with_context(|| format!("load config {}", config_path.display()))?;
     let refresh_sec = cli.refresh_sec.unwrap_or(config.refresh_sec);
     let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs);
-    let state = Arc::new(Mutex::new(AppState::default()));
+    let cache_path = paths::cache_file();
+    let cache = UsageCache::load_optional(&cache_path)
+        .with_context(|| format!("load cache {}", cache_path.display()))?;
+    let state = Arc::new(Mutex::new(AppState {
+        cache,
+        providers: Vec::new(),
+    }));
 
-    start_poller(Arc::clone(&state), config, plugin_dirs, refresh_sec);
+    start_poller(
+        Arc::clone(&state),
+        config,
+        plugin_dirs,
+        cache_path,
+        refresh_sec,
+    );
     serve(&cli.bind, state)
 }
 
@@ -50,6 +62,7 @@ fn start_poller(
     state: Arc<Mutex<AppState>>,
     config: AppConfig,
     plugin_dirs: Vec<PathBuf>,
+    cache_path: PathBuf,
     refresh_sec: u64,
 ) {
     thread::spawn(move || {
@@ -68,6 +81,14 @@ fn start_poller(
                         .expect("app state poisoned")
                         .cache
                         .upsert(snapshot);
+                    if let Err(error) = state
+                        .lock()
+                        .expect("app state poisoned")
+                        .cache
+                        .save(&cache_path)
+                    {
+                        log::warn!("failed to save usage cache: {error}");
+                    }
                 }
             }
             thread::sleep(Duration::from_secs(refresh_sec));
