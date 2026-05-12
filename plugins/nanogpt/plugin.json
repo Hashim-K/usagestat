@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "nanogpt",
+  "name": "NanoGPT",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#6366F1",
+  "links": [
+    { "label": "Usage", "url": "https://nano-gpt.com/usage" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Daily", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Monthly", "scope": "overview", "primaryOrder": 2 }
+  ]
+}
