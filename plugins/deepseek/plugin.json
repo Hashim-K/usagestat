@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "deepseek",
+  "name": "DeepSeek",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#4D6BFE",
+  "links": [
+    { "label": "Platform", "url": "https://platform.deepseek.com/usage" }
+  ],
+  "lines": [
+    { "type": "text", "label": "Balance", "scope": "overview" }
+  ]
+}
