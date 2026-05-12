@@ -6,6 +6,8 @@ use std::path::PathBuf;
 const ENV_ALLOWLIST: &[&str] = &[
     "AI_USAGE_PLUGIN_DIR",
     "CODEX_HOME",
+    "CODEX_REFRESH_URL",
+    "CODEX_USAGE_URL",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "CURSOR_HOME",
@@ -279,6 +281,7 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     if (value === null || value === undefined) return null;
                     var n = Number(value);
                     if (!Number.isFinite(n)) return null;
+                    if (Math.abs(n) < 10000000000) n = n * 1000;
                     return new Date(n).toISOString();
                 },
                 retryOnceOnAuth: function(opts) {
