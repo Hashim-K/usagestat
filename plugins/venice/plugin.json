@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "venice",
+  "name": "Venice",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#6B48FF",
+  "links": [
+    { "label": "API Keys", "url": "https://venice.ai/settings/api" }
+  ],
+  "lines": [
+    { "type": "text", "label": "Balance", "scope": "overview" }
+  ]
+}
