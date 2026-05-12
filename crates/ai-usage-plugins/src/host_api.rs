@@ -9,10 +9,15 @@ const ENV_ALLOWLIST: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "CURSOR_HOME",
+    "DEEPSEEK_API_KEY",
+    "DEEPSEEK_KEY",
     "GEMINI_API_KEY",
+    "GLM_API_KEY",
     "OPENAI_API_KEY",
     "OPENROUTER_API_KEY",
+    "OPENROUTER_API_BASE",
     "ZAI_API_KEY",
+    "ZAI_API_TOKEN",
 ];
 
 #[derive(Debug, Deserialize)]

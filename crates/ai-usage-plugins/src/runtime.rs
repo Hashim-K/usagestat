@@ -49,7 +49,7 @@ fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider) -> Result<UsageSnapsh
         .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
     let result: Object = probe_fn
         .call((probe_ctx,))
-        .map_err(|_| "probe() failed".to_string())?;
+        .map_err(|_| extract_error_string(&ctx))?;
 
     let display_name = result
         .get::<_, String>("displayName")
@@ -66,6 +66,21 @@ fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider) -> Result<UsageSnapsh
         metrics,
         fetched_at: Utc::now(),
     })
+}
+
+fn extract_error_string(ctx: &Ctx<'_>) -> String {
+    let exc = ctx.catch();
+    if exc.is_null() || exc.is_undefined() {
+        return "The plugin failed.".to_string();
+    }
+    if let Some(value) = exc.as_string() {
+        let message = value.to_string().unwrap_or_default();
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    "The plugin failed.".to_string()
 }
 
 fn inject_context(ctx: &Ctx<'_>, plugin_id: &str) -> rquickjs::Result<()> {

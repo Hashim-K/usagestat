@@ -25,6 +25,12 @@ Plugins are discovered from:
 2. `~/.config/ai-usage/plugins`
 3. `./plugins`
 
+Bundled providers:
+
+- `mock`: development fixture.
+- `host-smoke`: disabled fixture for host API checks.
+- `openrouter`: OpenRouter API credits via `OPENROUTER_API_KEY`.
+
 ## Config
 
 Default config path:
