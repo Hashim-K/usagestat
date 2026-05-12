@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "kimi-k2",
+  "name": "Kimi K2",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#1A6EFF",
+  "links": [
+    { "label": "Platform", "url": "https://platform.moonshot.cn" }
+  ],
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Balance", "scope": "detail" }
+  ]
+}
