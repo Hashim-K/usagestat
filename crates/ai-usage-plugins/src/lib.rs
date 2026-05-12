@@ -1,3 +1,4 @@
+mod host_api;
 mod loader;
 mod runtime;
 

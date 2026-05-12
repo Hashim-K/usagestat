@@ -57,3 +57,30 @@ HTTP endpoints currently implemented:
 - `GET /v1/providers`
 - `GET /v1/usage`
 - `GET /v1/usage/:providerId`
+
+## Plugin Host API
+
+Provider plugins export `globalThis.__ai_usage_plugin.probe(ctx)`.
+
+Available context:
+
+- `ctx.nowIso`
+- `ctx.app.version`
+- `ctx.app.platform`
+- `ctx.host.log.info|warn|error(message)`
+- `ctx.host.env.get(name)` for allowlisted variables
+- `ctx.host.fs.homeDir`
+- `ctx.host.fs.exists(path)`
+- `ctx.host.fs.readText(path)`
+- `ctx.host.fs.listDir(path)`
+- `ctx.host.http.request({ url, method, headers, bodyText, timeoutMs })`
+
+Host HTTP responses use:
+
+```json
+{
+  "status": 200,
+  "headers": {},
+  "bodyText": "{}"
+}
+```

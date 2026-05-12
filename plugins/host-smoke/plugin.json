@@ -1,0 +1,6 @@
+{
+  "id": "host-smoke",
+  "name": "Host API Smoke",
+  "entry": "plugin.js",
+  "enabledByDefault": false
+}
