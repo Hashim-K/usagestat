@@ -1,0 +1,18 @@
+[package]
+name = "ai-usage-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "ai_usage_plugins"
+path = "src/lib.rs"
+
+[dependencies]
+ai-usage-core = { path = "../ai-usage-core" }
+anyhow.workspace = true
+chrono.workspace = true
+log.workspace = true
+rquickjs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
