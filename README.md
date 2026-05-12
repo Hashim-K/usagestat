@@ -24,3 +24,36 @@ Plugins are discovered from:
 1. `AI_USAGE_PLUGIN_DIR`
 2. `~/.config/ai-usage/plugins`
 3. `./plugins`
+
+## Config
+
+Default config path:
+
+```text
+~/.config/ai-usage/config.toml
+```
+
+Example:
+
+```toml
+refreshSec = 60
+pluginDirs = ["/path/to/more/plugins"]
+
+[[providers]]
+id = "mock"
+enabled = true
+```
+
+Both binaries accept overrides:
+
+```bash
+cargo run -p ai-usage-cli -- --config ./config.toml --plugin-dir ./plugins list
+cargo run -p ai-usage-daemon -- --config ./config.toml --refresh-sec 30
+```
+
+HTTP endpoints currently implemented:
+
+- `GET /health`
+- `GET /v1/providers`
+- `GET /v1/usage`
+- `GET /v1/usage/:providerId`

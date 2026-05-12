@@ -17,3 +17,11 @@ pub struct LoadedProvider {
     pub dir: PathBuf,
     pub entry_script: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderSummary {
+    pub id: String,
+    pub name: String,
+    pub enabled: bool,
+}
