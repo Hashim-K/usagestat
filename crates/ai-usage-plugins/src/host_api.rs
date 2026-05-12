@@ -290,6 +290,20 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     var refreshed = opts.refresh();
                     if (!refreshed) return first;
                     return opts.request(refreshed);
+                },
+                needsRefreshByExpiry: function(opts) {
+                    var expiresAt = opts && (opts.expiresAt || opts.expires_at || opts.expiryDate || opts.expiry_date);
+                    if (expiresAt === null || expiresAt === undefined || expiresAt === "") return true;
+                    var ms = Number(expiresAt);
+                    if (!Number.isFinite(ms)) {
+                        ms = Date.parse(expiresAt);
+                    } else if (Math.abs(ms) < 10000000000) {
+                        ms = ms * 1000;
+                    }
+                    if (!Number.isFinite(ms)) return true;
+                    var bufferMs = Number(opts && opts.bufferMs);
+                    if (!Number.isFinite(bufferMs)) bufferMs = 300000;
+                    return Date.now() + bufferMs >= ms;
                 }
             };
 
@@ -301,6 +315,11 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     return text.replace(/(^|\s)([a-z])/g, function(match, space, letter) {
                         return space + letter.toUpperCase();
                     });
+                },
+                dollars: function(value) {
+                    var n = Number(value);
+                    if (!Number.isFinite(n)) return 0;
+                    return Math.round(n * 100) / 100;
                 }
             };
 
