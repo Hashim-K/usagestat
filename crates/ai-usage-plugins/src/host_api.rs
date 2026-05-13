@@ -1,27 +1,45 @@
 use rquickjs::{Ctx, Exception, Function, Object};
+use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value as JsonValue};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
 const ENV_ALLOWLIST: &[&str] = &[
     "AI_USAGE_PLUGIN_DIR",
+    "ARK_API_KEY",
+    "AUGMENT_ACCESS_TOKEN",
+    "CODEBUFF_API_KEY",
     "CODEX_HOME",
     "CODEX_REFRESH_URL",
     "CODEX_USAGE_URL",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
+    "CROF_API_KEY",
     "CURSOR_HOME",
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_KEY",
+    "DOUBAO_API_KEY",
     "GEMINI_API_KEY",
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "GLM_API_KEY",
     "COPILOT_API_TOKEN",
     "COPILOT_USAGE_URL",
+    "KILO_API_KEY",
+    "KIMI_API_KEY",
+    "MISTRAL_COOKIE",
+    "MOONSHOT_API_KEY",
+    "NANOGPT_API_KEY",
+    "OLLAMA_COOKIE",
     "OPENAI_API_KEY",
+    "OPENAI_PLATFORM_API_KEY",
     "OPENROUTER_API_KEY",
     "OPENROUTER_API_BASE",
+    "SRC_ACCESS_TOKEN",
+    "VENICE_API_KEY",
+    "VOLCENGINE_API_KEY",
+    "WARP_API_KEY",
     "ZAI_API_KEY",
     "ZAI_API_TOKEN",
 ];
@@ -58,6 +76,7 @@ pub fn inject<'js>(
     inject_env(ctx, &host)?;
     inject_fs(ctx, &host)?;
     inject_http(ctx, &host)?;
+    inject_sqlite(ctx, &host)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
     inject_utils(ctx)?;
@@ -341,6 +360,79 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         "#
         .as_bytes(),
     )
+}
+
+fn inject_sqlite<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let sqlite_obj = Object::new(ctx.clone())?;
+
+    sqlite_obj.set(
+        "query",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, db_path: String, sql: String| -> rquickjs::Result<String> {
+                if sql.lines().any(|line| line.trim_start().starts_with('.')) {
+                    return Err(Exception::throw_message(
+                        &ctx_inner,
+                        "sqlite3 dot-commands are not allowed",
+                    ));
+                }
+                let expanded = expand_path(&db_path);
+                sqlite_query_impl(&expanded.to_string_lossy(), &sql)
+                    .map_err(|e| Exception::throw_message(&ctx_inner, &e))
+            },
+        )?,
+    )?;
+
+    host.set("sqlite", sqlite_obj)?;
+    Ok(())
+}
+
+fn sqlite_query_impl(path: &str, sql: &str) -> Result<String, String> {
+    let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
+        Ok(c) => c,
+        Err(e) => {
+            let encoded = path
+                .replace('%', "%25")
+                .replace(' ', "%20")
+                .replace('#', "%23")
+                .replace('?', "%3F");
+            let uri = format!("file:{}?immutable=1", encoded);
+            Connection::open_with_flags(
+                &uri,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
+            )
+            .map_err(|e2| format!("sqlite open failed: {e} (fallback: {e2})"))?
+        }
+    };
+    let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
+    let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
+    let rows = stmt
+        .query_map([], |row| {
+            let mut obj = Map::new();
+            for (i, name) in col_names.iter().enumerate() {
+                let v: rusqlite::types::Value = row
+                    .get(i)
+                    .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
+                obj.insert(name.clone(), rusqlite_value_to_json(v));
+            }
+            Ok(JsonValue::Object(obj))
+        })
+        .map_err(|e| e.to_string())?;
+    let arr: Result<Vec<_>, _> = rows.collect();
+    let arr = arr.map_err(|e| e.to_string())?;
+    serde_json::to_string(&arr).map_err(|e| e.to_string())
+}
+
+fn rusqlite_value_to_json(v: rusqlite::types::Value) -> JsonValue {
+    match v {
+        rusqlite::types::Value::Null => JsonValue::Null,
+        rusqlite::types::Value::Integer(i) => JsonValue::Number(serde_json::Number::from(i)),
+        rusqlite::types::Value::Real(f) => serde_json::Number::from_f64(f)
+            .map(JsonValue::Number)
+            .unwrap_or(JsonValue::Null),
+        rusqlite::types::Value::Text(s) => JsonValue::String(s),
+        rusqlite::types::Value::Blob(b) => JsonValue::String(String::from_utf8_lossy(&b).into_owned()),
+    }
 }
 
 fn execute_http_request(request: HttpRequest) -> Result<HttpResponse, reqwest::Error> {
