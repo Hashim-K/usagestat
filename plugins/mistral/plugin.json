@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "mistral",
+  "name": "Mistral",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF7000",
+  "links": [
+    { "label": "Usage", "url": "https://admin.mistral.ai/organization/usage" }
+  ],
+  "envVars": ["MISTRAL_COOKIE"],
+  "lines": [
+    { "type": "text", "label": "Monthly spend", "scope": "overview" }
+  ]
+}
