@@ -12,13 +12,16 @@
   const SCOPES =
     "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload"
   const REFRESH_BUFFER_MS = 5 * 60 * 1000 // refresh 5 minutes before expiration
+  const CLAUDE_WEB_BASE_URL = "https://claude.ai/api"
 
   // Rate-limit state persisted across probe() calls (module scope survives re-invocations).
   const MIN_USAGE_FETCH_INTERVAL_MS = 5 * 60 * 1000  // never poll more than once per 5 min
   const DEFAULT_RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000 // fallback when no Retry-After header
   let rateLimitedUntilMs = 0  // epoch ms; 0 = not rate-limited
-  let lastUsageFetchMs = 0    // epoch ms of the most-recent API attempt
-  let cachedUsageData = null  // last successful API response body (parsed JSON)
+  let lastUsageFetchMs = 0    // epoch ms of the most-recent OAuth API attempt
+  let cachedUsageData = null  // last successful OAuth API response body (parsed JSON)
+  let lastWebUsageFetchMs = 0   // epoch ms of the most-recent Web API attempt
+  let cachedWebUsageData = null // last successful Web API response body (parsed JSON)
 
   function utf8DecodeBytes(bytes) {
     // Prefer native TextDecoder when available (QuickJS may not expose it).
@@ -41,12 +44,12 @@
       // 2-byte
       if (b0 >= 0xc2 && b0 <= 0xdf) {
         if (i + 1 >= bytes.length) {
-          out += "\ufffd"
+          out += "�"
           break
         }
         const b1 = bytes[i + 1] & 0xff
         if ((b1 & 0xc0) !== 0x80) {
-          out += "\ufffd"
+          out += "�"
           i += 1
           continue
         }
@@ -59,7 +62,7 @@
       // 3-byte
       if (b0 >= 0xe0 && b0 <= 0xef) {
         if (i + 2 >= bytes.length) {
-          out += "\ufffd"
+          out += "�"
           break
         }
         const b1 = bytes[i + 1] & 0xff
@@ -68,7 +71,7 @@
         const notOverlong = !(b0 === 0xe0 && b1 < 0xa0)
         const notSurrogate = !(b0 === 0xed && b1 >= 0xa0)
         if (!validCont || !notOverlong || !notSurrogate) {
-          out += "\ufffd"
+          out += "�"
           i += 1
           continue
         }
@@ -81,7 +84,7 @@
       // 4-byte
       if (b0 >= 0xf0 && b0 <= 0xf4) {
         if (i + 3 >= bytes.length) {
-          out += "\ufffd"
+          out += "�"
           break
         }
         const b1 = bytes[i + 1] & 0xff
@@ -91,7 +94,7 @@
         const notOverlong = !(b0 === 0xf0 && b1 < 0x90)
         const notTooHigh = !(b0 === 0xf4 && b1 > 0x8f)
         if (!validCont || !notOverlong || !notTooHigh) {
-          out += "\ufffd"
+          out += "�"
           i += 1
           continue
         }
@@ -103,7 +106,7 @@
         continue
       }
 
-      out += "\ufffd"
+      out += "�"
       i += 1
     }
     return out
@@ -645,7 +648,7 @@
     if (data.tokens > 0 || (includeZeroTokens && data.tokens === 0)) {
       parts.push(fmtTokens(data.tokens) + " tokens")
     }
-    return parts.join(" \u00b7 ")
+    return parts.join(" · ")
   }
 
   function pushDayUsageLine(lines, ctx, label, dayEntry) {
@@ -725,192 +728,375 @@
     })
   }
 
+  // ── Web mode helpers ───────────────────────────────────────────────────────
+
+  function getSessionKey(ctx) {
+    const v = readEnvText(ctx, "CLAUDE_AI_SESSION_KEY") || readEnvText(ctx, "CLAUDE_WEB_SESSION_KEY")
+    if (!v) return null
+    // Accept both bare key and "sessionKey=<value>" format
+    const bare = v.replace(/^sessionKey=/i, "").trim()
+    return bare || null
+  }
+
+  function buildWebHeaders(sessionKey) {
+    return {
+      Cookie: "sessionKey=" + sessionKey,
+      Accept: "application/json",
+      Origin: "https://claude.ai",
+      Referer: "https://claude.ai/settings/usage",
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+      "anthropic-client-platform": "web_claude_ai",
+    }
+  }
+
+  function fetchWebUsage(ctx, sessionKey) {
+    const headers = buildWebHeaders(sessionKey)
+
+    let orgResp
+    try {
+      orgResp = ctx.util.request({
+        method: "GET",
+        url: CLAUDE_WEB_BASE_URL + "/organizations",
+        headers: headers,
+        timeoutMs: 10000,
+      })
+    } catch (e) {
+      ctx.host.log.error("web mode: org request failed: " + String(e))
+      throw "Web usage request failed. Check your connection."
+    }
+
+    if (orgResp.status === 401 || orgResp.status === 403) {
+      throw "Web session invalid or expired. Set CLAUDE_AI_SESSION_KEY to your claude.ai sessionKey cookie."
+    }
+    if (orgResp.status < 200 || orgResp.status >= 300) {
+      throw "Web usage request failed (HTTP " + orgResp.status + "). Try again later."
+    }
+
+    const orgs = ctx.util.tryParseJson(orgResp.bodyText)
+    if (!Array.isArray(orgs) || orgs.length === 0) {
+      throw "No Claude organizations found in web response."
+    }
+    const orgId = orgs[0].uuid
+    if (!orgId) throw "Organization UUID missing in web response."
+
+    let usageResp
+    try {
+      usageResp = ctx.util.request({
+        method: "GET",
+        url: CLAUDE_WEB_BASE_URL + "/organizations/" + orgId + "/usage",
+        headers: headers,
+        timeoutMs: 10000,
+      })
+    } catch (e) {
+      ctx.host.log.error("web mode: usage request failed: " + String(e))
+      throw "Web usage request failed. Check your connection."
+    }
+
+    if (usageResp.status < 200 || usageResp.status >= 300) {
+      throw "Web usage request failed (HTTP " + usageResp.status + "). Try again later."
+    }
+
+    const usageData = ctx.util.tryParseJson(usageResp.bodyText)
+    if (!usageData) throw "Web usage response invalid. Try again later."
+
+    let accountInfo = null
+    try {
+      const accResp = ctx.util.request({
+        method: "GET",
+        url: CLAUDE_WEB_BASE_URL + "/account",
+        headers: headers,
+        timeoutMs: 5000,
+      })
+      if (accResp.status >= 200 && accResp.status < 300) {
+        accountInfo = ctx.util.tryParseJson(accResp.bodyText)
+      }
+    } catch {
+      // Account info is optional
+    }
+
+    ctx.host.log.info("web mode: usage fetched for org " + orgId)
+    return { usageData: usageData, accountInfo: accountInfo }
+  }
+
+  function webTierToPlanLabel(tier) {
+    const t = (tier || "").toLowerCase()
+    if (t === "free") return "Claude Free"
+    if (t === "pro" || t === "claude_pro") return "Claude Pro"
+    if (t === "max" || t === "claude_max_5" || t === "claude_max_20") return "Claude Max"
+    if (t === "team") return "Claude Team"
+    if (t === "enterprise") return "Claude Enterprise"
+    return "Claude (" + tier + ")"
+  }
+
+  // ── Usage window rendering ─────────────────────────────────────────────────
+
+  function pickUsageWindow(data, aliases) {
+    for (let i = 0; i < aliases.length; i++) {
+      const w = data[aliases[i]]
+      if (w && typeof w === "object") return w
+    }
+    return null
+  }
+
+  function addUsageWindowLines(ctx, data, lines) {
+    const fiveHour = data.five_hour
+    if (fiveHour && typeof fiveHour.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Session",
+        used: fiveHour.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(fiveHour.resets_at),
+        periodDurationMs: 5 * 60 * 60 * 1000,
+      }))
+    }
+
+    const sevenDay = data.seven_day
+    if (sevenDay && typeof sevenDay.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Weekly",
+        used: sevenDay.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(sevenDay.resets_at),
+        periodDurationMs: 7 * 24 * 60 * 60 * 1000,
+      }))
+    }
+
+    const sevenDaySonnet = data.seven_day_sonnet
+    if (sevenDaySonnet && typeof sevenDaySonnet.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Sonnet",
+        used: sevenDaySonnet.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(sevenDaySonnet.resets_at),
+        periodDurationMs: 7 * 24 * 60 * 60 * 1000,
+      }))
+    }
+
+    const sevenDayOpus = data.seven_day_opus
+    if (sevenDayOpus && typeof sevenDayOpus.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Opus",
+        used: sevenDayOpus.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(sevenDayOpus.resets_at),
+        periodDurationMs: 7 * 24 * 60 * 60 * 1000,
+      }))
+    }
+
+    // Design: check canonical name first, then legacy aliases
+    const designWindow = pickUsageWindow(data, [
+      "seven_day_design",
+      "seven_day_omelette",
+      "omelette_promotional",
+    ])
+    if (designWindow && typeof designWindow.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Claude Design",
+        used: designWindow.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(designWindow.resets_at),
+        periodDurationMs: 7 * 24 * 60 * 60 * 1000,
+      }))
+    }
+
+    // Routines: check canonical name first, then legacy aliases
+    const routinesWindow = pickUsageWindow(data, [
+      "seven_day_routines",
+      "seven_day_cowork",
+      "seven_day_claude_routines",
+    ])
+    if (routinesWindow && typeof routinesWindow.utilization === "number") {
+      lines.push(ctx.line.progress({
+        label: "Routines",
+        used: routinesWindow.utilization,
+        limit: 100,
+        format: { kind: "percent" },
+        resetsAt: ctx.util.toIso(routinesWindow.resets_at),
+        periodDurationMs: 7 * 24 * 60 * 60 * 1000,
+      }))
+    }
+
+    if (data.extra_usage && data.extra_usage.is_enabled) {
+      const used = data.extra_usage.used_credits
+      const limit = data.extra_usage.monthly_limit
+      if (typeof used === "number" && typeof limit === "number" && limit > 0) {
+        lines.push(ctx.line.progress({
+          label: "Extra usage spent",
+          used: ctx.fmt.dollars(used),
+          limit: ctx.fmt.dollars(limit),
+          format: { kind: "dollars" }
+        }))
+      } else if (typeof used === "number" && used > 0) {
+        lines.push(ctx.line.text({ label: "Extra usage spent", value: "$" + String(ctx.fmt.dollars(used)) }))
+      }
+    }
+  }
+
+  // ── probe() ────────────────────────────────────────────────────────────────
+
   function probe(ctx) {
     const creds = loadCredentials(ctx)
-    if (!creds || !creds.oauth || !creds.oauth.accessToken || !creds.oauth.accessToken.trim()) {
-      ctx.host.log.error("probe failed: not logged in")
-      throw "Not logged in. Run `claude` to authenticate."
+    const sessionKey = getSessionKey(ctx)
+    const hasOAuth = !!(creds && creds.oauth && creds.oauth.accessToken && creds.oauth.accessToken.trim())
+
+    if (!hasOAuth && !sessionKey) {
+      ctx.host.log.error("probe failed: no credentials or session key")
+      throw "Not logged in. Run `claude` to authenticate, or set CLAUDE_AI_SESSION_KEY."
     }
 
     const nowMs = Date.now()
-    let accessToken = creds.oauth.accessToken
     const homePath = getClaudeHomeOverride(ctx)
-    const canFetchLiveUsage = hasProfileScope(creds)
-
     let data = null
     let lines = []
+    let plan = null
     let rateLimited = false
     let retryAfterSeconds = null
-    if (canFetchLiveUsage) {
-      if (nowMs < rateLimitedUntilMs) {
-        // Still within a rate-limit window from a previous probe call — skip the
-        // API request entirely and surface the remaining wait time to the user.
-        rateLimited = true
-        retryAfterSeconds = Math.ceil((rateLimitedUntilMs - nowMs) / 1000)
-        data = cachedUsageData
-        ctx.host.log.info("usage fetch skipped: rate-limited for " + retryAfterSeconds + "s more")
-      } else {
-        // Rate-limit window has expired (or was never set).  Check whether we were
-        // previously rate-limited so we can bypass the min-interval guard: a short
-        // Retry-After (< 5 min) must not be swallowed by the normal poll throttle.
-        const wasRateLimited = rateLimitedUntilMs > 0
-        rateLimitedUntilMs = 0
 
-        if (!wasRateLimited && nowMs - lastUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
-          // Polled too recently in normal operation — reuse last cached response.
-          data = cachedUsageData
-          ctx.host.log.info(
-            "usage fetch skipped: last fetch was " +
-            Math.round((nowMs - lastUsageFetchMs) / 1000) + "s ago (min interval " +
-            MIN_USAGE_FETCH_INTERVAL_MS / 1000 + "s)"
-          )
-        } else {
-        // Proactively refresh if token is expired or about to expire
-        if (needsRefresh(ctx, creds.oauth, nowMs)) {
-          ctx.host.log.info("token needs refresh (expired or expiring soon)")
-          const refreshed = refreshToken(ctx, creds)
-          if (refreshed) {
-            accessToken = refreshed
-          } else {
-            ctx.host.log.warn("proactive refresh failed, trying with existing token")
+    if (hasOAuth) {
+      // ── OAuth mode ───────────────────────────────────────────────────────
+      let accessToken = creds.oauth.accessToken
+      const canFetchLiveUsage = hasProfileScope(creds)
+
+      if (creds.oauth.subscriptionType) {
+        const basePlan = ctx.fmt.planLabel(creds.oauth.subscriptionType)
+        if (basePlan) {
+          let tierSuffix = ""
+          const rlt = String(creds.oauth.rateLimitTier || "")
+          const tierMatch = rlt.match(/(\d+)x/)
+          if (tierMatch) {
+            tierSuffix = " " + tierMatch[1] + "x"
           }
+          plan = basePlan + tierSuffix
         }
+      }
 
-        lastUsageFetchMs = nowMs
-        let resp
-        let didRefresh = false
-        try {
-          resp = ctx.util.retryOnceOnAuth({
-            request: (token) => {
-              try {
-                return fetchUsage(ctx, token || accessToken)
-              } catch (e) {
-                ctx.host.log.error("usage request exception: " + String(e))
-                if (didRefresh) {
-                  throw "Usage request failed after refresh. Try again."
-                }
-                throw "Usage request failed. Check your connection."
-              }
-            },
-            refresh: () => {
-              ctx.host.log.info("usage returned 401, attempting refresh")
-              didRefresh = true
-              return refreshToken(ctx, creds)
-            },
-          })
-        } catch (e) {
-          if (typeof e === "string") throw e
-          ctx.host.log.error("usage request failed: " + String(e))
-          throw "Usage request failed. Check your connection."
-        }
-
-        if (ctx.util.isAuthStatus(resp.status)) {
-          ctx.host.log.error("usage returned auth error after all retries: status=" + resp.status)
-          throw "Token expired. Run `claude` to log in again."
-        }
-
-        if (resp.status === 429) {
+      if (canFetchLiveUsage) {
+        if (nowMs < rateLimitedUntilMs) {
+          // Still within a rate-limit window from a previous probe call — skip the
+          // API request entirely and surface the remaining wait time to the user.
           rateLimited = true
-          retryAfterSeconds = parseRetryAfterSeconds(resp.headers)
-          const backoffMs = retryAfterSeconds !== null
-            ? retryAfterSeconds * 1000
-            : DEFAULT_RATE_LIMIT_BACKOFF_MS
-          rateLimitedUntilMs = nowMs + backoffMs
+          retryAfterSeconds = Math.ceil((rateLimitedUntilMs - nowMs) / 1000)
           data = cachedUsageData
-          ctx.host.log.warn(
-            "usage rate limited (429), backing off for " +
-            Math.round(backoffMs / 1000) + "s"
-          )
-        } else if (resp.status < 200 || resp.status >= 300) {
-          ctx.host.log.error("usage returned error: status=" + resp.status)
-          throw "Usage request failed (HTTP " + String(resp.status) + "). Try again later."
+          ctx.host.log.info("usage fetch skipped: rate-limited for " + retryAfterSeconds + "s more")
         } else {
-          ctx.host.log.info("usage fetch succeeded")
-          data = ctx.util.tryParseJson(resp.bodyText)
-          if (data === null) {
-            throw "Usage response invalid. Try again later."
-          }
-          cachedUsageData = data
+          // Rate-limit window has expired (or was never set).  Check whether we were
+          // previously rate-limited so we can bypass the min-interval guard: a short
+          // Retry-After (< 5 min) must not be swallowed by the normal poll throttle.
+          const wasRateLimited = rateLimitedUntilMs > 0
           rateLimitedUntilMs = 0
+
+          if (!wasRateLimited && nowMs - lastUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
+            // Polled too recently in normal operation — reuse last cached response.
+            data = cachedUsageData
+            ctx.host.log.info(
+              "usage fetch skipped: last fetch was " +
+              Math.round((nowMs - lastUsageFetchMs) / 1000) + "s ago (min interval " +
+              MIN_USAGE_FETCH_INTERVAL_MS / 1000 + "s)"
+            )
+          } else {
+            // Proactively refresh if token is expired or about to expire
+            if (needsRefresh(ctx, creds.oauth, nowMs)) {
+              ctx.host.log.info("token needs refresh (expired or expiring soon)")
+              const refreshed = refreshToken(ctx, creds)
+              if (refreshed) {
+                accessToken = refreshed
+              } else {
+                ctx.host.log.warn("proactive refresh failed, trying with existing token")
+              }
+            }
+
+            lastUsageFetchMs = nowMs
+            let resp
+            let didRefresh = false
+            try {
+              resp = ctx.util.retryOnceOnAuth({
+                request: (token) => {
+                  try {
+                    return fetchUsage(ctx, token || accessToken)
+                  } catch (e) {
+                    ctx.host.log.error("usage request exception: " + String(e))
+                    if (didRefresh) {
+                      throw "Usage request failed after refresh. Try again."
+                    }
+                    throw "Usage request failed. Check your connection."
+                  }
+                },
+                refresh: () => {
+                  ctx.host.log.info("usage returned 401, attempting refresh")
+                  didRefresh = true
+                  return refreshToken(ctx, creds)
+                },
+              })
+            } catch (e) {
+              if (typeof e === "string") throw e
+              ctx.host.log.error("usage request failed: " + String(e))
+              throw "Usage request failed. Check your connection."
+            }
+
+            if (ctx.util.isAuthStatus(resp.status)) {
+              ctx.host.log.error("usage returned auth error after all retries: status=" + resp.status)
+              throw "Token expired. Run `claude` to log in again."
+            }
+
+            if (resp.status === 429) {
+              rateLimited = true
+              retryAfterSeconds = parseRetryAfterSeconds(resp.headers)
+              const backoffMs = retryAfterSeconds !== null
+                ? retryAfterSeconds * 1000
+                : DEFAULT_RATE_LIMIT_BACKOFF_MS
+              rateLimitedUntilMs = nowMs + backoffMs
+              data = cachedUsageData
+              ctx.host.log.warn(
+                "usage rate limited (429), backing off for " +
+                Math.round(backoffMs / 1000) + "s"
+              )
+            } else if (resp.status < 200 || resp.status >= 300) {
+              ctx.host.log.error("usage returned error: status=" + resp.status)
+              throw "Usage request failed (HTTP " + String(resp.status) + "). Try again later."
+            } else {
+              ctx.host.log.info("usage fetch succeeded")
+              data = ctx.util.tryParseJson(resp.bodyText)
+              if (data === null) {
+                throw "Usage response invalid. Try again later."
+              }
+              cachedUsageData = data
+              rateLimitedUntilMs = 0
+            }
+          } // end fetch else-branch
         }
-        } // end fetch else-branch
+      } else {
+        ctx.host.log.info("skipping live usage fetch for inference-only token")
       }
     } else {
-      ctx.host.log.info("skipping live usage fetch for inference-only token")
-    }
-
-    let plan = null
-    if (creds.oauth.subscriptionType) {
-      const basePlan = ctx.fmt.planLabel(creds.oauth.subscriptionType)
-      if (basePlan) {
-        let tierSuffix = ""
-        const rlt = String(creds.oauth.rateLimitTier || "")
-        const tierMatch = rlt.match(/(\d+)x/)
-        if (tierMatch) {
-          tierSuffix = " " + tierMatch[1] + "x"
+      // ── Web mode ─────────────────────────────────────────────────────────
+      if (nowMs - lastWebUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
+        data = cachedWebUsageData
+        ctx.host.log.info(
+          "web usage fetch skipped: last fetch was " +
+          Math.round((nowMs - lastWebUsageFetchMs) / 1000) + "s ago"
+        )
+      } else {
+        lastWebUsageFetchMs = nowMs
+        const result = fetchWebUsage(ctx, sessionKey)
+        data = result.usageData
+        cachedWebUsageData = data
+        if (result.accountInfo && result.accountInfo.rate_limit_tier) {
+          plan = webTierToPlanLabel(result.accountInfo.rate_limit_tier)
         }
-        plan = basePlan + tierSuffix
       }
     }
 
+    // ── Render usage windows ─────────────────────────────────────────────────
     if (data) {
-      if (data.five_hour && typeof data.five_hour.utilization === "number") {
-        lines.push(ctx.line.progress({
-          label: "Session",
-          used: data.five_hour.utilization,
-          limit: 100,
-          format: { kind: "percent" },
-          resetsAt: ctx.util.toIso(data.five_hour.resets_at),
-          periodDurationMs: 5 * 60 * 60 * 1000 // 5 hours
-        }))
-      }
-      if (data.seven_day && typeof data.seven_day.utilization === "number") {
-        lines.push(ctx.line.progress({
-          label: "Weekly",
-          used: data.seven_day.utilization,
-          limit: 100,
-          format: { kind: "percent" },
-          resetsAt: ctx.util.toIso(data.seven_day.resets_at),
-          periodDurationMs: 7 * 24 * 60 * 60 * 1000 // 7 days
-        }))
-      }
-      if (data.seven_day_sonnet && typeof data.seven_day_sonnet.utilization === "number") {
-        lines.push(ctx.line.progress({
-          label: "Sonnet",
-          used: data.seven_day_sonnet.utilization,
-          limit: 100,
-          format: { kind: "percent" },
-          resetsAt: ctx.util.toIso(data.seven_day_sonnet.resets_at),
-          periodDurationMs: 7 * 24 * 60 * 60 * 1000 // 7 days
-        }))
-      }
-      if (data.seven_day_omelette && typeof data.seven_day_omelette.utilization === "number") {
-        lines.push(ctx.line.progress({
-          label: "Claude Design",
-          used: data.seven_day_omelette.utilization,
-          limit: 100,
-          format: { kind: "percent" },
-          resetsAt: ctx.util.toIso(data.seven_day_omelette.resets_at),
-          periodDurationMs: 7 * 24 * 60 * 60 * 1000 // 7 days
-        }))
-      }
-
-      if (data.extra_usage && data.extra_usage.is_enabled) {
-        const used = data.extra_usage.used_credits
-        const limit = data.extra_usage.monthly_limit
-        if (typeof used === "number" && typeof limit === "number" && limit > 0) {
-          lines.push(ctx.line.progress({
-            label: "Extra usage spent",
-            used: ctx.fmt.dollars(used),
-            limit: ctx.fmt.dollars(limit),
-            format: { kind: "dollars" }
-          }))
-        } else if (typeof used === "number" && used > 0) {
-          lines.push(ctx.line.text({ label: "Extra usage spent", value: "$" + String(ctx.fmt.dollars(used)) }))
-        }
-      }
+      addUsageWindowLines(ctx, data, lines)
     }
 
+    // ── Token usage from ccusage ─────────────────────────────────────────────
     const usageResult = queryTokenUsage(ctx, homePath)
     if (usageResult.status === "ok") {
       const usage = usageResult.data
@@ -988,6 +1174,8 @@
     rateLimitedUntilMs = 0
     lastUsageFetchMs = 0
     cachedUsageData = null
+    lastWebUsageFetchMs = 0
+    cachedWebUsageData = null
   }
 
   globalThis.__openusage_plugin = { id: "claude", probe, _resetState }
