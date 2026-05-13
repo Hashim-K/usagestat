@@ -18,6 +18,16 @@
       ideName: "windsurf-next",
       stateDb: "~/Library/Application Support/Windsurf - Next/User/globalStorage/state.vscdb",
     },
+    {
+      marker: "windsurf",
+      ideName: "windsurf",
+      stateDb: "~/.config/Windsurf/User/globalStorage/state.vscdb",
+    },
+    {
+      marker: "windsurf-next",
+      ideName: "windsurf-next",
+      stateDb: "~/.config/Windsurf - Next/User/globalStorage/state.vscdb",
+    },
   ]
 
   function readFiniteNumber(value) {
