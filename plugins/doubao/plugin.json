@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "doubao",
+  "name": "Doubao",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#1E6FFF",
+  "links": [
+    { "label": "Dashboard", "url": "https://console.volcengine.com/ark/region:ark+cn-beijing/usage" }
+  ],
+  "envVars": ["ARK_API_KEY", "DOUBAO_API_KEY", "VOLCENGINE_API_KEY"],
+  "lines": [
+    { "type": "progress", "label": "Requests", "scope": "overview" }
+  ]
+}
