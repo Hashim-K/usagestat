@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "ollama",
+  "name": "Ollama",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FFFFFF",
+  "links": [
+    { "label": "Settings", "url": "https://ollama.com/settings" }
+  ],
+  "envVars": ["OLLAMA_COOKIE"],
+  "lines": [
+    { "type": "progress", "label": "Session", "scope": "overview" },
+    { "type": "progress", "label": "Weekly", "scope": "detail" }
+  ]
+}
