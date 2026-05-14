@@ -9,6 +9,8 @@
     { "label": "Dashboard", "url": "https://console.volcengine.com/ark/region:ark+cn-beijing/usage" }
   ],
   "envVars": ["ARK_API_KEY", "DOUBAO_API_KEY", "VOLCENGINE_API_KEY"],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Requests", "scope": "overview" }
   ]

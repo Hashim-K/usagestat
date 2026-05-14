@@ -9,6 +9,8 @@
     { "label": "Usage", "url": "https://platform.openai.com/usage" },
     { "label": "Status", "url": "https://status.openai.com" }
   ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Available", "scope": "detail" }

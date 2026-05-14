@@ -8,6 +8,8 @@
   "links": [
     { "label": "Platform", "url": "https://platform.moonshot.cn" }
   ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Balance", "scope": "detail" }

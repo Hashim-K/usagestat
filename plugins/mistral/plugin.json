@@ -9,6 +9,8 @@
     { "label": "Usage", "url": "https://admin.mistral.ai/organization/usage" }
   ],
   "envVars": ["MISTRAL_COOKIE"],
+  "supportedModes": ["web"],
+  "autoMode": "web",
   "lines": [
     { "type": "text", "label": "Monthly spend", "scope": "overview" }
   ]

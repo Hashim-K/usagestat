@@ -6,6 +6,8 @@
   "entry": "plugin.js",
   "icon": "icon.svg",
   "brandColor": "#C09CFF",
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "local",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "Bonus Credits", "scope": "overview" },

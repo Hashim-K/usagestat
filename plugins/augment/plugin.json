@@ -9,6 +9,8 @@
     { "label": "Account", "url": "https://app.augmentcode.com/account" },
     { "label": "Status", "url": "https://status.augmentcode.com" }
   ],
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "oauth",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
   ]

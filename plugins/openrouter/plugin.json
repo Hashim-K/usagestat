@@ -2,5 +2,7 @@
   "id": "openrouter",
   "name": "OpenRouter",
   "entry": "plugin.js",
-  "enabledByDefault": false
+  "enabledByDefault": false,
+  "supportedModes": ["api"],
+  "autoMode": "api"
 }

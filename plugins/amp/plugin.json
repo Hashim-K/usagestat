@@ -6,6 +6,8 @@
   "entry": "plugin.js",
   "icon": "icon.svg",
   "brandColor": "#F34E3F",
+  "supportedModes": ["api", "local"],
+  "autoMode": "local",
   "lines": [
     { "type": "progress", "label": "Free", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Bonus", "scope": "detail" },

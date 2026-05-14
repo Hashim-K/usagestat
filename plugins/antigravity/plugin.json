@@ -6,6 +6,8 @@
   "entry": "plugin.js",
   "icon": "icon.svg",
   "brandColor": "#4285F4",
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "oauth",
   "lines": [
     {
       "type": "progress",

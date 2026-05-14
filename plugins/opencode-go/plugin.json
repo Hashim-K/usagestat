@@ -16,6 +16,8 @@
       "url": "https://opencode.ai/docs/go/"
     }
   ],
+  "supportedModes": ["local"],
+  "autoMode": "local",
   "lines": [
     {
       "type": "progress",

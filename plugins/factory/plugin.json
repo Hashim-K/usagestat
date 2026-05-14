@@ -6,6 +6,8 @@
   "entry": "plugin.js",
   "icon": "icon.svg",
   "brandColor": "#020202",
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "oauth",
   "lines": [
     { "type": "progress", "label": "Standard", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "Premium", "scope": "detail" }

@@ -8,6 +8,8 @@
   "links": [
     { "label": "Dashboard", "url": "https://crof.ai" }
   ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Requests", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Credits", "scope": "detail" }

@@ -15,6 +15,8 @@
     { "type": "progress", "label": "Free Tool Calls", "scope": "detail" },
     { "type": "progress", "label": "Search", "scope": "overview" }
   ],
+  "supportedModes": ["api", "local"],
+  "autoMode": "local",
   "links": [
     { "label": "Dashboard", "url": "https://synthetic.new/billing" }
   ]

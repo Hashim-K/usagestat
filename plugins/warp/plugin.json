@@ -8,6 +8,8 @@
   "links": [
     { "label": "API Keys", "url": "https://docs.warp.dev/reference/cli/api-keys" }
   ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Usage", "scope": "detail" },

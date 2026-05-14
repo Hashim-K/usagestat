@@ -2,5 +2,7 @@
   "id": "mock",
   "name": "Mock Provider",
   "entry": "plugin.js",
-  "enabledByDefault": true
+  "enabledByDefault": true,
+  "supportedModes": ["local"],
+  "autoMode": "local"
 }

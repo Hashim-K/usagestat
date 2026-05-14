@@ -8,6 +8,8 @@
   "links": [
     { "label": "Usage", "url": "https://nano-gpt.com/usage" }
   ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
   "lines": [
     { "type": "progress", "label": "Daily", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "Monthly", "scope": "overview", "primaryOrder": 2 }

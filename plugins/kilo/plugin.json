@@ -8,6 +8,8 @@
   "links": [
     { "label": "Usage", "url": "https://app.kilo.ai/usage" }
   ],
+  "supportedModes": ["api", "local"],
+  "autoMode": "local",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
     { "type": "text", "label": "Balance", "scope": "detail" },

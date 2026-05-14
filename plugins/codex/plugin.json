@@ -16,6 +16,8 @@
       "url": "https://platform.openai.com/usage"
     }
   ],
+  "supportedModes": ["oauth", "local", "web"],
+  "autoMode": "oauth",
   "lines": [
     {
       "type": "progress",

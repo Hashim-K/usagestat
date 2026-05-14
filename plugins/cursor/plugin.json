@@ -10,6 +10,8 @@
     { "label": "Status", "url": "https://status.cursor.com/" },
     { "label": "Dashboard", "url": "https://www.cursor.com/dashboard" }
   ],
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "local",
   "lines": [
     { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 2 },
     { "type": "progress", "label": "Total usage", "scope": "overview", "primaryOrder": 1 },
