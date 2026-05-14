@@ -9,6 +9,16 @@ pub struct ProviderManifest {
     pub entry: String,
     #[serde(default)]
     pub enabled_by_default: bool,
+    #[serde(default)]
+    pub version: Option<String>,
+    #[serde(default)]
+    pub links: Vec<ProviderLink>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ProviderLink {
+    pub label: String,
+    pub url: String,
 }
 
 #[derive(Debug, Clone)]

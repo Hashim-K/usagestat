@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppConfig {
     #[serde(default = "default_refresh_sec")]
@@ -24,12 +25,53 @@ impl Default for AppConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderConfig {
+    /// Provider plugin id, such as `claude` or `codex`.
     pub id: String,
+    /// Stable instance id for multiple configured instances of the same provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// Optional parent/group id for child sources shown under one provider tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_parent: Option<String>,
+    /// User-facing label override for this provider instance.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display_name: Option<String>,
     #[serde(default = "default_true")]
     pub enabled: bool,
+    /// Preferred source mode: auto, web, cli, oauth, api, local, custom.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ProviderSource>,
+    /// Command used by custom command-backed providers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_command: Option<String>,
+    /// Common credential/settings fields used by provider preference pages.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cookie_header: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub region: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_id: Option<String>,
+    /// Provider-specific settings. Prefer this for new fields instead of widening
+    /// the top-level schema for every provider-specific preference.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub settings: BTreeMap<String, toml::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProviderSource {
+    Auto,
+    Web,
+    Cli,
+    Oauth,
+    Api,
+    Local,
+    Custom,
 }
 
 impl AppConfig {
