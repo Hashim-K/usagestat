@@ -21,6 +21,10 @@ pub struct ProviderManifest {
     /// Empty string means unspecified / plugin decides internally.
     #[serde(default)]
     pub auto_mode: String,
+    /// The primary web URL for this provider (e.g. "https://claude.ai").
+    /// Used to locate browser cookies when running in web mode.
+    #[serde(default)]
+    pub web_url: Option<String>,
 }
 
 impl ProviderManifest {
@@ -68,4 +72,6 @@ pub struct ProviderSummary {
     pub supported_modes: Vec<String>,
     /// What "auto" resolves to for this plugin.
     pub auto_mode: String,
+    /// The primary web URL for this provider, if web mode is supported.
+    pub web_url: Option<String>,
 }

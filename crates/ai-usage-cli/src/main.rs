@@ -546,7 +546,11 @@ fn main() -> Result<()> {
         } => run_cache_clear(snapshots, history, all, cookies, cost, provider, json),
         Command::Auth {
             command: AuthCommand::ImportCookies { provider, format },
-        } => run_auth_import_cookies(provider, json || matches!(format, OutputFormat::Json)),
+        } => run_auth_import_cookies(
+            &providers,
+            provider,
+            json || matches!(format, OutputFormat::Json),
+        ),
     }
 }
 
@@ -1361,8 +1365,29 @@ fn clear_file(cache: &str, path: PathBuf) -> CacheClearResult {
 
 // ── auth ─────────────────────────────────────────────────────────────────────
 
-fn run_auth_import_cookies(provider: String, json: bool) -> Result<()> {
-    let result = auth_cookies::import_cookies(&provider);
+fn run_auth_import_cookies(providers: &[LoadedProvider], provider: String, json: bool) -> Result<()> {
+    let matched = providers
+        .iter()
+        .find(|p| p.manifest.id.eq_ignore_ascii_case(&provider));
+
+    let web_url = match matched.and_then(|p| p.manifest.web_url.as_deref()) {
+        Some(url) => url.to_string(),
+        None => {
+            let err = auth_cookies::CookieImportError {
+                error: "NO_WEB_URL".to_string(),
+                message: format!(
+                    "Provider '{provider}' does not have a webUrl configured and does not support cookie import."
+                ),
+            };
+            if json {
+                println!("{}", serde_json::to_string_pretty(&err)?);
+                std::process::exit(1);
+            }
+            anyhow::bail!("{}: {}", err.error, err.message);
+        }
+    };
+
+    let result = auth_cookies::import_cookies(&provider, &web_url);
     match result {
         Ok(imported) => {
             if json {
@@ -1484,6 +1509,7 @@ fn provider_summaries(providers: &[LoadedProvider], config: &AppConfig) -> Vec<P
             enabled: config.is_enabled(&p.manifest.id, p.manifest.enabled_by_default),
             supported_modes: p.manifest.supported_modes.clone(),
             auto_mode: p.manifest.auto_mode.clone(),
+            web_url: p.manifest.web_url.clone(),
         })
         .collect()
 }

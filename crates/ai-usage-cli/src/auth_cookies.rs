@@ -12,7 +12,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
-const COOKIE_DOMAINS: &[&str] = &["chatgpt.com", "openai.com"];
 const SESSION_NOT_FOUND: &str = "SESSION_NOT_FOUND";
 
 #[derive(Debug, Serialize)]
@@ -67,24 +66,34 @@ impl Drop for TempCookieDb {
     }
 }
 
-pub fn import_cookies(provider: &str) -> Result<CookieImportResult, CookieImportError> {
-    let provider_id = normalize_provider(provider);
-    if provider_id != "codex" {
-        return Err(CookieImportError {
-            error: "UNSUPPORTED_PROVIDER".to_string(),
-            message: format!("Cookie import is currently implemented for codex, not {provider}."),
-        });
+/// Extract the registrable hostname from a URL (e.g. "https://claude.ai/foo" → "claude.ai").
+fn host_from_url(url: &str) -> Option<String> {
+    let after_scheme = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let host = after_scheme.split('/').next()?;
+    let host = host.split(':').next()?; // strip port if any
+    if host.is_empty() {
+        None
+    } else {
+        Some(host.to_lowercase())
     }
+}
+
+pub fn import_cookies(provider_id: &str, web_url: &str) -> Result<CookieImportResult, CookieImportError> {
+    let Some(host) = host_from_url(web_url) else {
+        return Err(CookieImportError {
+            error: "INVALID_WEB_URL".to_string(),
+            message: format!("Provider '{provider_id}' has an invalid webUrl: {web_url}"),
+        });
+    };
 
     for profile in discover_profiles() {
-        let Ok(cookies) = read_profile_cookies(&profile) else {
+        let Ok(cookies) = read_profile_cookies(&profile, &host) else {
             continue;
         };
-        let usable = cookies.iter().any(has_openai_session_cookie);
-        if !usable {
+        if cookies.is_empty() {
             continue;
         }
-        let cookie_header = build_cookie_header(cookies);
+        let cookie_header = build_cookie_header(cookies, &host);
         if cookie_header.is_empty() {
             continue;
         }
@@ -96,18 +105,10 @@ pub fn import_cookies(provider: &str) -> Result<CookieImportResult, CookieImport
         });
     }
 
-    let message = "No usable ChatGPT/OpenAI browser cookies found.";
     Err(CookieImportError {
         error: SESSION_NOT_FOUND.to_string(),
-        message: message.to_string(),
+        message: format!("No browser cookies found for {host}."),
     })
-}
-
-fn normalize_provider(provider: &str) -> &str {
-    match provider.trim().to_lowercase().as_str() {
-        "codex" | "openai" | "chatgpt" => "codex",
-        _ => provider,
-    }
 }
 
 fn discover_profiles() -> Vec<ProfileCandidate> {
@@ -176,7 +177,7 @@ fn discover_profiles() -> Vec<ProfileCandidate> {
     profiles
 }
 
-fn read_profile_cookies(profile: &ProfileCandidate) -> Result<Vec<CookieRecord>, String> {
+fn read_profile_cookies(profile: &ProfileCandidate, host: &str) -> Result<Vec<CookieRecord>, String> {
     let temp = copy_cookie_db(&profile.cookies_db)?;
     let conn = Connection::open_with_flags(
         &temp.db,
@@ -188,12 +189,12 @@ fn read_profile_cookies(profile: &ProfileCandidate) -> Result<Vec<CookieRecord>,
         .prepare(
             "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly
              FROM cookies
-             WHERE host_key LIKE ?1 OR host_key LIKE ?2",
+             WHERE host_key LIKE ?1",
         )
         .map_err(|error| format!("prepare cookie query: {error}"))?;
-    let domain_patterns = ["%chatgpt.com", "%openai.com"];
+    let domain_pattern = format!("%{host}");
     let rows = stmt
-        .query_map(domain_patterns, |row| {
+        .query_map([&domain_pattern], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
@@ -365,24 +366,12 @@ fn is_cookie_value_character(character: char) -> bool {
     character.is_ascii_alphanumeric() || "-_.~%|=/+".contains(character)
 }
 
-fn has_openai_session_cookie(cookie: &CookieRecord) -> bool {
-    let domain = cookie.domain.to_lowercase();
-    if !COOKIE_DOMAINS.iter().any(|needle| domain.contains(needle)) {
-        return false;
-    }
-    let name = cookie.name.to_lowercase();
-    name.contains("session-token")
-        || name.contains("authjs")
-        || name.contains("next-auth")
-        || name == "_account"
-}
-
-fn build_cookie_header(cookies: Vec<CookieRecord>) -> String {
+fn build_cookie_header(cookies: Vec<CookieRecord>, host: &str) -> String {
     let mut seen = HashSet::new();
     let mut ordered = cookies;
     ordered.sort_by(|a, b| {
-        cookie_rank(b)
-            .cmp(&cookie_rank(a))
+        cookie_rank(b, host)
+            .cmp(&cookie_rank(a, host))
             .then_with(|| a.name.cmp(&b.name))
     });
     ordered
@@ -393,13 +382,11 @@ fn build_cookie_header(cookies: Vec<CookieRecord>) -> String {
         .join("; ")
 }
 
-fn cookie_rank(cookie: &CookieRecord) -> i32 {
+fn cookie_rank(cookie: &CookieRecord, host: &str) -> i32 {
     let mut rank = 0;
-    if cookie.domain.contains("chatgpt.com") {
+    // Cookies on the exact host rank higher than subdomain cookies.
+    if cookie.domain.trim_start_matches('.') == host {
         rank += 10;
-    }
-    if has_openai_session_cookie(cookie) {
-        rank += 100;
     }
     if cookie.secure {
         rank += 2;

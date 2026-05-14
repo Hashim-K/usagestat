@@ -11,6 +11,7 @@
   "envVars": ["MISTRAL_COOKIE"],
   "supportedModes": ["web"],
   "autoMode": "web",
+  "webUrl": "https://console.mistral.ai",
   "lines": [
     { "type": "text", "label": "Monthly spend", "scope": "overview" }
   ]

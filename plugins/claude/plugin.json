@@ -12,6 +12,7 @@
   ],
   "supportedModes": ["oauth", "web"],
   "autoMode": "oauth",
+  "webUrl": "https://claude.ai",
   "lines": [
     { "type": "progress", "label": "Session", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "Weekly", "scope": "overview" },

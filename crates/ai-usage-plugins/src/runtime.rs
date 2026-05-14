@@ -1,5 +1,5 @@
 use crate::host_api;
-use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, UsageSnapshot, paths};
+use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, ProviderManifest, UsageSnapshot, paths};
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
 
@@ -39,7 +39,7 @@ pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnap
 }
 
 fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider, source_mode: &str) -> Result<UsageSnapshot, String> {
-    inject_context(&ctx, &provider.manifest.id, source_mode)
+    inject_context(&ctx, &provider.manifest, source_mode)
         .map_err(|_| "host api injection failed".to_string())?;
 
     ctx.eval::<(), _>(provider.entry_script.as_bytes())
@@ -92,13 +92,13 @@ fn extract_error_string(ctx: &Ctx<'_>) -> String {
     "The plugin failed.".to_string()
 }
 
-fn inject_context(ctx: &Ctx<'_>, plugin_id: &str, source_mode: &str) -> rquickjs::Result<()> {
+fn inject_context(ctx: &Ctx<'_>, manifest: &ProviderManifest, source_mode: &str) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     let app = Object::new(ctx.clone())?;
     app.set("version", env!("CARGO_PKG_VERSION"))?;
     app.set("platform", std::env::consts::OS)?;
     let app_data_dir = paths::data_dir();
-    let plugin_data_dir = app_data_dir.join("plugins").join(plugin_id);
+    let plugin_data_dir = app_data_dir.join("plugins").join(&manifest.id);
     let _ = std::fs::create_dir_all(&plugin_data_dir);
     app.set("appDataDir", app_data_dir.to_string_lossy().to_string())?;
     app.set(
@@ -109,9 +109,12 @@ fn inject_context(ctx: &Ctx<'_>, plugin_id: &str, source_mode: &str) -> rquickjs
     let probe_ctx = Object::new(ctx.clone())?;
     probe_ctx.set("nowIso", Utc::now().to_rfc3339())?;
     probe_ctx.set("sourceMode", source_mode)?;
+    if let Some(web_url) = &manifest.web_url {
+        probe_ctx.set("webUrl", web_url.as_str())?;
+    }
     probe_ctx.set("app", app)?;
     globals.set("__ai_usage_ctx", probe_ctx.clone())?;
-    host_api::inject(ctx, &probe_ctx, plugin_id)?;
+    host_api::inject(ctx, &probe_ctx, &manifest.id)?;
     Ok(())
 }
 

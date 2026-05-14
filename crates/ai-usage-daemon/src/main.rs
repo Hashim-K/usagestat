@@ -233,6 +233,7 @@ fn provider_summaries(providers: &[LoadedProvider], config: &AppConfig) -> Vec<P
             enabled: config.is_enabled(&p.manifest.id, p.manifest.enabled_by_default),
             supported_modes: p.manifest.supported_modes.clone(),
             auto_mode: p.manifest.auto_mode.clone(),
+            web_url: p.manifest.web_url.clone(),
         })
         .collect()
 }

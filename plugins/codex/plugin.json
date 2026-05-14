@@ -18,6 +18,7 @@
   ],
   "supportedModes": ["oauth", "local", "web"],
   "autoMode": "oauth",
+  "webUrl": "https://chatgpt.com",
   "lines": [
     {
       "type": "progress",

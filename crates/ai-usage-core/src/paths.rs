@@ -43,9 +43,14 @@ pub fn plugin_dirs(config: &AppConfig, extra_dirs: &[PathBuf]) -> Vec<PathBuf> {
 }
 
 fn dedupe_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut out = Vec::new();
+    let mut out: Vec<PathBuf> = Vec::new();
     for dir in dirs {
-        if !out.iter().any(|existing| existing == &dir) {
+        let canonical = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
+        let already_seen = out.iter().any(|existing| {
+            let existing_canonical = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.clone());
+            existing_canonical == canonical
+        });
+        if !already_seen {
             out.push(dir);
         }
     }
