@@ -838,6 +838,41 @@
     return null
   }
 
+  function moneyMajorUnits(value) {
+    const n = Number(value)
+    if (!Number.isFinite(n)) return null
+    // Claude usage APIs return Extra usage amounts in minor units (cents).
+    return Math.round(n) / 100
+  }
+
+  function currencySymbol(code) {
+    const c = String(code || "").trim().toUpperCase()
+    if (c === "EUR") return "€"
+    if (c === "GBP") return "£"
+    if (c === "JPY") return "¥"
+    return "$"
+  }
+
+  function formatMoneyAmount(value, code) {
+    if (typeof value !== "number" || !Number.isFinite(value)) return ""
+    const symbol = currencySymbol(code)
+    return symbol + value.toFixed(2).replace(/\.00$/, "")
+  }
+
+  function nextMonthResetIso(nowIso) {
+    const now = new Date(nowIso || Date.now())
+    if (Number.isNaN(now.getTime())) return null
+    return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1, 0, 0, 0)).toISOString()
+  }
+
+  function formatMonthDay(iso) {
+    if (!iso) return null
+    const d = new Date(iso)
+    if (Number.isNaN(d.getTime())) return null
+    const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+    return months[d.getUTCMonth()] + " " + String(d.getUTCDate())
+  }
+
   function addUsageWindowLines(ctx, data, lines) {
     const fiveHour = data.five_hour
     if (fiveHour && typeof fiveHour.utilization === "number") {
@@ -922,17 +957,34 @@
     }
 
     if (data.extra_usage && data.extra_usage.is_enabled) {
-      const used = data.extra_usage.used_credits
-      const limit = data.extra_usage.monthly_limit
+      const used = moneyMajorUnits(data.extra_usage.used_credits)
+      const limit = moneyMajorUnits(data.extra_usage.monthly_limit)
+      const currency = data.extra_usage.currency || data.extra_usage.currency_code || data.extra_usage.currencyCode || "USD"
+      const resetIso = ctx.util.toIso(
+        data.extra_usage.resets_at ||
+        data.extra_usage.reset_at ||
+        data.extra_usage.resetsAt ||
+        data.extra_usage.resetAt ||
+        data.extra_usage.monthly_reset_at ||
+        data.extra_usage.monthlyResetAt ||
+        data.extra_usage.period_end ||
+        data.extra_usage.periodEnd ||
+        data.extra_usage.billing_cycle_end ||
+        data.extra_usage.billingCycleEnd
+      ) || nextMonthResetIso(ctx.nowIso)
+      const resetText = formatMonthDay(resetIso)
+
       if (typeof used === "number" && typeof limit === "number" && limit > 0) {
-        lines.push(ctx.line.progress({
-          label: "Extra usage spent",
-          used: ctx.fmt.dollars(used),
-          limit: ctx.fmt.dollars(limit),
-          format: { kind: "dollars" }
-        }))
+        const pct = Math.round((used / limit) * 100)
+        let value = formatMoneyAmount(used, currency) + " / " + formatMoneyAmount(limit, currency)
+        value += " (" + pct + "% used"
+        if (resetText) value += ", resets " + resetText
+        value += ")"
+        lines.push(ctx.line.text({ label: "Extra usage spent", value: value }))
       } else if (typeof used === "number" && used > 0) {
-        lines.push(ctx.line.text({ label: "Extra usage spent", value: "$" + String(ctx.fmt.dollars(used)) }))
+        let value = formatMoneyAmount(used, currency)
+        if (resetText) value += " (resets " + resetText + ")"
+        lines.push(ctx.line.text({ label: "Extra usage spent", value: value }))
       }
     }
   }
