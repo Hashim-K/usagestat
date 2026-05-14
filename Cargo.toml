@@ -14,16 +14,20 @@ license = "MIT"
 
 [workspace.dependencies]
 anyhow = "1"
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 dirs = "6"
 env_logger = "0.11"
 log = "0.4"
+pbkdf2 = "0.12"
 reqwest = { version = "0.13", features = ["blocking", "json", "socks"] }
 rquickjs = "0.11"
 rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+sha1 = "0.10"
 signal-hook = "0.3"
 tabled = { version = "0.17", features = ["std"] }
 thiserror = "2"

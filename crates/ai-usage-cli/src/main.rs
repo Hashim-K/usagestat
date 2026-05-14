@@ -1,9 +1,10 @@
+mod auth_cookies;
 mod batch_probe;
 mod history;
 
 use ai_usage_core::{
-    paths, AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat,
-    ProviderSummary, UsageSnapshot,
+    AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
+    UsageSnapshot, paths,
 };
 use ai_usage_plugins::discover_providers;
 use anyhow::{Context, Result};
@@ -13,7 +14,7 @@ use serde::Serialize;
 use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
-use tabled::{settings::Style, Table, Tabled};
+use tabled::{Table, Tabled, settings::Style};
 
 #[derive(Debug, Parser)]
 #[command(name = "ai-usage")]
@@ -213,6 +214,10 @@ enum Command {
         #[command(subcommand)]
         command: CacheCommand,
     },
+    Auth {
+        #[command(subcommand)]
+        command: AuthCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -258,6 +263,19 @@ enum CacheCommand {
         /// CodexBar-compatible provider cache scope. No-op until per-provider caches exist.
         #[arg(long)]
         provider: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum AuthCommand {
+    /// Import browser cookies into a raw Cookie header
+    ImportCookies {
+        /// Provider whose browser cookies should be imported.
+        #[arg(long)]
+        provider: String,
+        /// Output format. Defaults to text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
     },
 }
 
@@ -498,6 +516,9 @@ fn main() -> Result<()> {
                     provider,
                 },
         } => run_cache_clear(snapshots, history, all, cookies, cost, provider, json),
+        Command::Auth {
+            command: AuthCommand::ImportCookies { provider, format },
+        } => run_auth_import_cookies(provider, json || matches!(format, OutputFormat::Json)),
     }
 }
 
@@ -526,6 +547,7 @@ fn effective_args() -> Vec<OsString> {
                     | "plugin"
                     | "config"
                     | "cache"
+                    | "auth"
                     | "help"
             )
         })
@@ -1298,6 +1320,32 @@ fn clear_file(cache: &str, path: PathBuf) -> CacheClearResult {
             cleared: false,
             error: Some(error.to_string()),
         },
+    }
+}
+
+// ── auth ─────────────────────────────────────────────────────────────────────
+
+fn run_auth_import_cookies(provider: String, json: bool) -> Result<()> {
+    let result = auth_cookies::import_cookies(&provider);
+    match result {
+        Ok(imported) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&imported)?);
+            } else {
+                println!(
+                    "Imported cookies for {} from {} profile {}.",
+                    imported.provider_id, imported.source, imported.profile
+                );
+            }
+            Ok(())
+        }
+        Err(error) => {
+            if json {
+                println!("{}", serde_json::to_string_pretty(&error)?);
+                std::process::exit(1);
+            }
+            anyhow::bail!("{}: {}", error.error, error.message);
+        }
     }
 }
 

@@ -60,6 +60,8 @@ daemon, plugin host, and stable HTTP contract that any desktop shell can consume
 - `ai-usage usage [providers...]` / `ai-usage probe [providers...]` for one-shot usage snapshots.
 - `ai-usage status [providers...]` and `usage --status` for provider status pages.
 - `ai-usage cost [providers...]` for normalized cost/token data, with native local log scanners as the next parity step.
+- `ai-usage auth import-cookies --provider codex` for Linux Chromium-family
+  ChatGPT/OpenAI cookie import.
 - `ai-usage export --format json|csv`.
 - `ai-usage daemon` or separate daemon binary.
 - `ai-usage config validate|dump|init`.

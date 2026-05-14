@@ -100,6 +100,12 @@ ai-usage config validate
 ai-usage config dump
 ```
 
+Import ChatGPT/OpenAI browser cookies for Codex web usage:
+
+```bash
+ai-usage auth import-cookies --provider codex --format json
+```
+
 ## Global Options
 
 Global options can be placed before or after the subcommand.
@@ -339,6 +345,41 @@ Current backend caches:
 ```text
 snapshots   ~/.local/share/ai-usage/snapshots.json
 history     ~/.local/share/ai-usage/history.jsonl
+```
+
+### `auth import-cookies`
+
+Imports browser cookies into a raw `Cookie` header suitable for `cookieHeader`
+config fields. The command currently supports Codex/OpenAI cookies from
+Chromium-family browser profiles on Linux: Chrome, Brave, and Chromium.
+
+```bash
+ai-usage auth import-cookies --provider codex --format json
+```
+
+The importer copies locked SQLite cookie databases to a temporary directory
+before reading, tries Linux Secret Service through `secret-tool`, and falls back
+to Chromium's legacy `peanuts` key where applicable. Cookie values are only
+printed in the success payload.
+
+Successful JSON output:
+
+```json
+{
+  "providerId": "codex",
+  "cookieHeader": "name=value; other=value",
+  "source": "chrome",
+  "profile": "Default"
+}
+```
+
+If no usable ChatGPT/OpenAI session cookie is found, the command exits non-zero:
+
+```json
+{
+  "error": "SESSION_NOT_FOUND",
+  "message": "No usable ChatGPT/OpenAI browser cookies found."
+}
 ```
 
 ## Plugin Discovery

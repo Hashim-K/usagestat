@@ -18,6 +18,7 @@ cargo run -p ai-usage-cli -- --json usage mock
 cargo run -p ai-usage-cli -- usage --provider claude --save
 cargo run -p ai-usage-cli -- status claude codex
 cargo run -p ai-usage-cli -- export --format csv
+cargo run -p ai-usage-cli -- auth import-cookies --provider codex --format json
 cargo run -p ai-usage-cli -- config validate
 cargo run -p ai-usage-cli -- cache clear --history
 cargo run -p ai-usage-cli -- plugin validate
