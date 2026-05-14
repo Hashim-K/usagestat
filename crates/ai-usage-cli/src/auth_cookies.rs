@@ -312,7 +312,57 @@ fn decrypt_aes128_cbc(payload: &[u8], password: &str) -> Option<String> {
     let decrypted = Aes128CbcDec::new(&key.into(), &iv.into())
         .decrypt_padded_vec_mut::<Pkcs7>(payload)
         .ok()?;
-    String::from_utf8(decrypted).ok()
+    clean_decrypted_cookie_value(&decrypted)
+}
+
+fn clean_decrypted_cookie_value(decrypted: &[u8]) -> Option<String> {
+    let mut candidates: Vec<&[u8]> = Vec::new();
+    if let Some(jwt_start) = decrypted.windows(3).position(|window| window == b"eyJ") {
+        if jwt_start < 48 {
+            candidates.push(&decrypted[jwt_start..]);
+        }
+    }
+    for offset in [32, 28, 0] {
+        if decrypted.len() > offset {
+            candidates.push(&decrypted[offset..]);
+        }
+    }
+
+    candidates.into_iter().find_map(clean_cookie_candidate)
+}
+
+fn clean_cookie_candidate(candidate: &[u8]) -> Option<String> {
+    let mut value = String::from_utf8_lossy(candidate)
+        .chars()
+        .filter(|character| *character != '\r' && *character != '\n' && *character != '\t')
+        .collect::<String>();
+
+    value = value
+        .chars()
+        .filter(|character| character.is_ascii() && !character.is_ascii_control())
+        .collect();
+
+    let value = value
+        .trim_matches(|character: char| !is_cookie_value_character(character))
+        .to_string();
+
+    if value.is_empty() {
+        return None;
+    }
+
+    let sample_len = value.len().min(10);
+    if !value.as_bytes()[..sample_len]
+        .iter()
+        .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+    {
+        return None;
+    }
+
+    Some(value)
+}
+
+fn is_cookie_value_character(character: char) -> bool {
+    character.is_ascii_alphanumeric() || "-_.~%|=/+".contains(character)
 }
 
 fn has_openai_session_cookie(cookie: &CookieRecord) -> bool {
