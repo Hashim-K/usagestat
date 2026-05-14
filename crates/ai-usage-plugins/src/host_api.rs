@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Command;
 
 const ENV_ALLOWLIST: &[&str] = &[
     "AI_USAGE_PLUGIN_DIR",
@@ -68,6 +69,24 @@ struct HttpResponse {
     body_text: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandRequest {
+    program: String,
+    #[serde(default)]
+    args: Vec<String>,
+    #[serde(default = "default_command_timeout_ms")]
+    timeout_ms: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CommandResponse {
+    status: i32,
+    stdout: String,
+    stderr: String,
+}
+
 pub fn inject<'js>(
     ctx: &Ctx<'js>,
     probe_ctx: &Object<'js>,
@@ -78,10 +97,37 @@ pub fn inject<'js>(
     inject_env(ctx, &host)?;
     inject_fs(ctx, &host)?;
     inject_http(ctx, &host)?;
+    inject_command(ctx, &host)?;
     inject_sqlite(ctx, &host)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
     inject_utils(ctx)?;
+    Ok(())
+}
+
+fn inject_command<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let command_obj = Object::new(ctx.clone())?;
+
+    command_obj.set(
+        "_runRaw",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, req_json: String| -> rquickjs::Result<String> {
+                let request: CommandRequest = serde_json::from_str(&req_json).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("invalid command request: {error}"),
+                    )
+                })?;
+                let response = execute_command_request(request)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error))?;
+                serde_json::to_string(&response)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
+            },
+        )?,
+    )?;
+
+    host.set("command", command_obj)?;
     Ok(())
 }
 
@@ -238,6 +284,17 @@ fn patch_http_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                 }));
                 return JSON.parse(response);
             };
+            if (__ai_usage_ctx.host.command && __ai_usage_ctx.host.command._runRaw) {
+                var runRaw = __ai_usage_ctx.host.command._runRaw;
+                __ai_usage_ctx.host.command.run = function(req) {
+                    var response = runRaw(JSON.stringify({
+                        program: req.program,
+                        args: req.args || [],
+                        timeoutMs: req.timeoutMs || 10000
+                    }));
+                    return JSON.parse(response);
+                };
+            }
         })();
         "#
         .as_bytes(),
@@ -300,6 +357,10 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                 },
                 toIso: function(value) {
                     if (value === null || value === undefined) return null;
+                    if (typeof value === "string") {
+                        var parsed = Date.parse(value);
+                        if (Number.isFinite(parsed)) return new Date(parsed).toISOString();
+                    }
                     var n = Number(value);
                     if (!Number.isFinite(n)) return null;
                     if (Math.abs(n) < 10000000000) n = n * 1000;
@@ -433,7 +494,9 @@ fn rusqlite_value_to_json(v: rusqlite::types::Value) -> JsonValue {
             .map(JsonValue::Number)
             .unwrap_or(JsonValue::Null),
         rusqlite::types::Value::Text(s) => JsonValue::String(s),
-        rusqlite::types::Value::Blob(b) => JsonValue::String(String::from_utf8_lossy(&b).into_owned()),
+        rusqlite::types::Value::Blob(b) => {
+            JsonValue::String(String::from_utf8_lossy(&b).into_owned())
+        }
     }
 }
 
@@ -472,6 +535,26 @@ fn execute_http_request(request: HttpRequest) -> Result<HttpResponse, reqwest::E
     })
 }
 
+fn execute_command_request(request: CommandRequest) -> Result<CommandResponse, String> {
+    if request.program != "gh" {
+        return Err(format!("command not allowed: {}", request.program));
+    }
+    if request.timeout_ms > 30_000 {
+        return Err("command timeout exceeds 30000ms".to_string());
+    }
+
+    let output = Command::new(&request.program)
+        .args(&request.args)
+        .output()
+        .map_err(|error| format!("command failed to start: {error}"))?;
+
+    Ok(CommandResponse {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    })
+}
+
 fn expand_path(path: &str) -> PathBuf {
     if path == "~" {
         return home_dir().unwrap_or_else(|| PathBuf::from(path));
@@ -495,6 +578,10 @@ fn default_method() -> String {
 }
 
 fn default_timeout_ms() -> u64 {
+    10_000
+}
+
+fn default_command_timeout_ms() -> u64 {
     10_000
 }
 

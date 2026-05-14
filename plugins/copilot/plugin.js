@@ -81,6 +81,30 @@
     return null;
   }
 
+  function loadTokenFromGhCommand(ctx) {
+    try {
+      if (!ctx.host.command || typeof ctx.host.command.run !== "function") return null;
+      const result = ctx.host.command.run({
+        program: "gh",
+        args: ["auth", "token"],
+        timeoutMs: 10000,
+      });
+      if (result && result.status === 0 && typeof result.stdout === "string") {
+        const token = result.stdout.trim();
+        if (token) {
+          ctx.host.log.info("token loaded from gh auth token");
+          return { token: token, source: "gh-command" };
+        }
+      }
+      if (result && result.stderr) {
+        ctx.host.log.info("gh auth token failed: " + String(result.stderr).trim());
+      }
+    } catch (e) {
+      ctx.host.log.info("gh auth token command failed: " + String(e));
+    }
+    return null;
+  }
+
   function loadTokenFromStateFile(ctx) {
     const data = readJson(ctx, ctx.app.pluginDataDir + "/auth.json");
     if (data && data.token) {
@@ -111,6 +135,7 @@
       loadTokenFromEnv(ctx) ||
       loadTokenFromKeychain(ctx) ||
       loadTokenFromGhCli(ctx) ||
+      loadTokenFromGhCommand(ctx) ||
       loadTokenFromStateFile(ctx)
     );
   }
@@ -215,7 +240,7 @@
     }
 
     // Persist gh-cli token to OpenUsage keychain for future use
-    if (source === "gh-cli") {
+    if (source === "gh-cli" || source === "gh-command") {
       saveToken(ctx, token);
     }
 
