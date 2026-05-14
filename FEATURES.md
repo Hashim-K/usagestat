@@ -50,17 +50,22 @@ daemon, plugin host, and stable HTTP contract that any desktop shell can consume
 - Config migration/versioning.
 - Import from `~/.codexbar/config.json`.
 - Import from CrossUsage/OpenUsage config where useful.
+- Rich provider config schema for display names, instances, parent tabs, source
+  modes, custom commands, and common credential/region/workspace fields.
 - Secret storage strategy for Linux: libsecret first, encrypted file fallback.
 
 ## 5. CLI
 
 - `ai-usage list` for known providers.
-- `ai-usage probe [providers...]` for one-shot usage snapshots.
+- `ai-usage usage [providers...]` / `ai-usage probe [providers...]` for one-shot usage snapshots.
+- `ai-usage status [providers...]` and `usage --status` for provider status pages.
+- `ai-usage cost [providers...]` for normalized cost/token data, with native local log scanners as the next parity step.
 - `ai-usage export --format json|csv`.
 - `ai-usage daemon` or separate daemon binary.
 - `ai-usage config validate|dump|init`.
 - `ai-usage plugin validate|test`.
 - `ai-usage cache inspect|clear`.
+- CodexBar-compatible provider selection flags: `--source`, `--account`, `--account-index`, `--all-accounts`.
 - Human output for terminals and JSON output for scripts.
 - Exit codes that distinguish config, provider, timeout, and runtime failures.
 

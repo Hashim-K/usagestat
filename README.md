@@ -14,11 +14,18 @@ contracts:
 
 ```bash
 cargo run -p ai-usage-cli -- list
-cargo run -p ai-usage-cli -- --json probe mock
+cargo run -p ai-usage-cli -- --json usage mock
+cargo run -p ai-usage-cli -- usage --provider claude --save
+cargo run -p ai-usage-cli -- status claude codex
+cargo run -p ai-usage-cli -- export --format csv
+cargo run -p ai-usage-cli -- config validate
+cargo run -p ai-usage-cli -- cache clear --history
 cargo run -p ai-usage-cli -- plugin validate
 cargo run -p ai-usage-daemon
 curl http://127.0.0.1:6736/v1/usage
 ```
+
+CLI usage docs: [docs/cli.md](docs/cli.md).
 
 Plugins are discovered from:
 
@@ -59,6 +66,32 @@ pluginDirs = ["/path/to/more/plugins"]
 [[providers]]
 id = "mock"
 enabled = true
+
+[[providers]]
+id = "claude"
+instanceId = "claude-web"
+displayName = "Claude Web"
+enabled = true
+source = "web"
+cookieHeader = "sessionKey=..."
+
+[[providers]]
+id = "openai-api"
+instanceId = "openai-api-eu"
+displayName = "OpenAI API EU"
+enabled = true
+source = "api"
+apiKey = "sk-..."
+region = "eu"
+workspaceId = "workspace-123"
+
+[[providers]]
+id = "custom"
+instanceId = "local-script"
+displayName = "Local Usage Script"
+enabled = true
+source = "custom"
+customCommand = "/path/to/usage-script --json"
 ```
 
 Both binaries accept overrides:

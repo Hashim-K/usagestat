@@ -1,4 +1,4 @@
-use ai_usage_core::{NormalizedMetrics, UsageSnapshot, paths};
+use ai_usage_core::{paths, NormalizedMetrics, UsageSnapshot};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
@@ -41,8 +41,7 @@ pub fn record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
 pub fn append_jsonl(rec: &SnapshotRecord) -> Result<()> {
     let path = history_jsonl_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create dir {:?}", parent))?;
+        std::fs::create_dir_all(parent).with_context(|| format!("create dir {:?}", parent))?;
     }
     let line = serde_json::to_string(rec).context("serialize history record")?;
     let mut f = OpenOptions::new()
@@ -56,8 +55,7 @@ pub fn append_jsonl(rec: &SnapshotRecord) -> Result<()> {
 
 /// Read all records from a JSONL file, skipping malformed lines.
 pub fn read_jsonl(path: &std::path::Path) -> Result<Vec<SnapshotRecord>> {
-    let text = std::fs::read_to_string(path)
-        .with_context(|| format!("read {:?}", path))?;
+    let text = std::fs::read_to_string(path).with_context(|| format!("read {:?}", path))?;
     Ok(text
         .lines()
         .filter(|l| !l.trim().is_empty())
