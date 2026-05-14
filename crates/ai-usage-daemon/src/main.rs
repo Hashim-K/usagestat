@@ -78,7 +78,8 @@ fn start_poller(
 
             for provider in &providers {
                 if config.is_enabled(&provider.manifest.id, provider.manifest.enabled_by_default) {
-                    let snapshot = probe_provider(provider);
+                    let source = config.source_mode(&provider.manifest.id);
+                    let snapshot = probe_provider(provider, source);
                     let mut guard = state.lock().expect("app state poisoned");
                     guard.cache.upsert(snapshot);
                     if let Err(e) = guard.cache.save(&cache_path) {
@@ -103,11 +104,7 @@ fn start_poller(
     });
 }
 
-fn serve(
-    bind: &str,
-    state: Arc<Mutex<AppState>>,
-    refresh_flag: Arc<AtomicBool>,
-) -> Result<()> {
+fn serve(bind: &str, state: Arc<Mutex<AppState>>, refresh_flag: Arc<AtomicBool>) -> Result<()> {
     let listener = TcpListener::bind(bind)?;
     log::info!("listening on http://{bind}");
 
@@ -168,7 +165,11 @@ fn route(
     }
 
     if method != "GET" {
-        return response_json(405, "Method Not Allowed", r#"{"error":"method_not_allowed"}"#);
+        return response_json(
+            405,
+            "Method Not Allowed",
+            r#"{"error":"method_not_allowed"}"#,
+        );
     }
 
     if path == "/health" {
@@ -230,6 +231,8 @@ fn provider_summaries(providers: &[LoadedProvider], config: &AppConfig) -> Vec<P
             id: p.manifest.id.clone(),
             name: p.manifest.name.clone(),
             enabled: config.is_enabled(&p.manifest.id, p.manifest.enabled_by_default),
+            supported_modes: p.manifest.supported_modes.clone(),
+            auto_mode: p.manifest.auto_mode.clone(),
         })
         .collect()
 }

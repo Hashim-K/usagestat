@@ -92,7 +92,7 @@ enum Command {
         /// Fetch and print provider status-page state when available
         #[arg(long)]
         status: bool,
-        /// Accepted for CodexBar CLI compatibility. Provider support is plugin-specific.
+        /// Override source mode for all selected providers (auto, web, cli, oauth, api, local).
         #[arg(long, value_enum)]
         source: Option<SourceMode>,
         /// Alias for --source web.
@@ -145,7 +145,7 @@ enum Command {
         /// Fetch and print provider status-page state when available
         #[arg(long)]
         status: bool,
-        /// Accepted for CodexBar CLI compatibility. Provider support is plugin-specific.
+        /// Override source mode for all selected providers (auto, web, cli, oauth, api, local).
         #[arg(long, value_enum)]
         source: Option<SourceMode>,
         /// Alias for --source web.
@@ -311,6 +311,34 @@ enum SourceMode {
     Local,
 }
 
+impl SourceMode {
+    fn as_str(self) -> &'static str {
+        match self {
+            SourceMode::Auto => "auto",
+            SourceMode::Web => "web",
+            SourceMode::Cli => "cli",
+            SourceMode::Oauth => "oauth",
+            SourceMode::Api => "api",
+            SourceMode::Local => "local",
+        }
+    }
+}
+
+fn resolve_source_mode(
+    cli_source: Option<SourceMode>,
+    web: bool,
+    provider_id: &str,
+    config: &AppConfig,
+) -> String {
+    if web {
+        return "web".to_string();
+    }
+    if let Some(mode) = cli_source {
+        return mode.as_str().to_string();
+    }
+    config.source_mode(provider_id).to_string()
+}
+
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse_from(effective_args());
@@ -365,8 +393,6 @@ fn main() -> Result<()> {
             let selection = provider_selection(provider_ids, provider);
             warn_unsupported_usage_compat(
                 json,
-                source,
-                web,
                 web_timeout,
                 account.as_deref(),
                 account_index,
@@ -386,6 +412,8 @@ fn main() -> Result<()> {
                 cli.plain,
                 save,
                 status,
+                source,
+                web,
             )
         }
         Command::List {
@@ -415,8 +443,6 @@ fn main() -> Result<()> {
             let selection = provider_selection(provider_ids, provider);
             warn_unsupported_usage_compat(
                 json,
-                source,
-                web,
                 web_timeout,
                 account.as_deref(),
                 account_index,
@@ -436,6 +462,8 @@ fn main() -> Result<()> {
                 cli.plain,
                 save,
                 status,
+                source,
+                web,
             )
         }
         Command::Status {
@@ -570,6 +598,7 @@ struct ListRow {
     id: String,
     name: String,
     status: String,
+    modes: String,
 }
 
 fn run_list(
@@ -598,10 +627,11 @@ fn run_list(
     if plain {
         for s in &summaries {
             println!(
-                "{}\t{}\t{}",
+                "{}\t{}\t{}\t{}",
                 s.id,
                 s.name,
-                if s.enabled { "enabled" } else { "disabled" }
+                if s.enabled { "enabled" } else { "disabled" },
+                format_modes(s),
             );
         }
         return Ok(());
@@ -617,6 +647,7 @@ fn run_list(
             } else {
                 "disabled".into()
             },
+            modes: format_modes(s),
         })
         .collect();
 
@@ -637,6 +668,8 @@ fn run_probe(
     plain: bool,
     save: bool,
     include_status: bool,
+    cli_source: Option<SourceMode>,
+    web: bool,
 ) -> Result<()> {
     let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
     if selected.is_empty() {
@@ -659,7 +692,8 @@ fn run_probe(
         if !json {
             eprintln!("ai-usage:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
         }
-        let snap = batch_probe::run_probe_with_timeout(provider, Some(&interrupt));
+        let source = resolve_source_mode(cli_source, web, &provider.manifest.id, config);
+        let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
         if save {
             let rec = history::record_from_snapshot(&snap);
             if let Err(e) = history::append_jsonl(&rec) {
@@ -998,7 +1032,8 @@ fn run_cost(
         selected
             .iter()
             .map(|provider| {
-                let snap = batch_probe::run_probe_with_timeout(provider, Some(&interrupt));
+                let source = config.source_mode(&provider.manifest.id).to_string();
+                let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
                 cost_record_from_snapshot(&snap)
             })
             .collect()
@@ -1151,7 +1186,8 @@ fn run_export(
         let mut recs = Vec::new();
         for (i, provider) in selected.iter().enumerate() {
             eprintln!("ai-usage:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
-            let snap = batch_probe::run_probe_with_timeout(provider, Some(&interrupt));
+            let source = config.source_mode(&provider.manifest.id).to_string();
+            let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
             recs.push(history::record_from_snapshot(&snap));
         }
         recs
@@ -1380,6 +1416,18 @@ fn provider_selection(positional: Vec<String>, provider: Option<String>) -> Prov
     }
 }
 
+fn format_modes(s: &ProviderSummary) -> String {
+    if s.supported_modes.is_empty() {
+        return String::new();
+    }
+    let auto_suffix = if s.auto_mode.is_empty() {
+        String::new()
+    } else {
+        format!(" (auto={})", s.auto_mode)
+    };
+    format!("{}{}", s.supported_modes.join(", "), auto_suffix)
+}
+
 fn normalize_provider_id(id: &str) -> &str {
     match id {
         "opencodego" | "opencode-go" => "opencode-go",
@@ -1393,8 +1441,6 @@ fn normalize_provider_id(id: &str) -> &str {
 #[allow(clippy::too_many_arguments)]
 fn warn_unsupported_usage_compat(
     json: bool,
-    source: Option<SourceMode>,
-    web: bool,
     web_timeout: Option<f64>,
     account: Option<&str>,
     account_index: Option<usize>,
@@ -1406,11 +1452,6 @@ fn warn_unsupported_usage_compat(
 ) {
     if json {
         return;
-    }
-    if source.is_some() || web {
-        eprintln!(
-            "ai-usage: --source/--web are accepted for compatibility; source selection is currently provider-plugin controlled"
-        );
     }
     if web_timeout.is_some() {
         eprintln!(
@@ -1441,6 +1482,8 @@ fn provider_summaries(providers: &[LoadedProvider], config: &AppConfig) -> Vec<P
             id: p.manifest.id.clone(),
             name: p.manifest.name.clone(),
             enabled: config.is_enabled(&p.manifest.id, p.manifest.enabled_by_default),
+            supported_modes: p.manifest.supported_modes.clone(),
+            auto_mode: p.manifest.auto_mode.clone(),
         })
         .collect()
 }

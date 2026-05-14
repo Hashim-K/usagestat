@@ -3,7 +3,15 @@ use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, UsageSnapshot, p
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
 
-pub fn probe_provider(provider: &LoadedProvider) -> UsageSnapshot {
+pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnapshot {
+    if let Some(error) = provider.manifest.check_mode(source_mode) {
+        return UsageSnapshot::error(
+            provider.manifest.id.clone(),
+            provider.manifest.name.clone(),
+            error,
+        );
+    }
+
     let fallback = || {
         UsageSnapshot::error(
             provider.manifest.id.clone(),
@@ -20,7 +28,7 @@ pub fn probe_provider(provider: &LoadedProvider) -> UsageSnapshot {
     };
 
     ctx.with(|ctx| {
-        run_in_context(ctx, provider).unwrap_or_else(|message| {
+        run_in_context(ctx, provider, source_mode).unwrap_or_else(|message| {
             UsageSnapshot::error(
                 provider.manifest.id.clone(),
                 provider.manifest.name.clone(),
@@ -30,8 +38,8 @@ pub fn probe_provider(provider: &LoadedProvider) -> UsageSnapshot {
     })
 }
 
-fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider) -> Result<UsageSnapshot, String> {
-    inject_context(&ctx, &provider.manifest.id)
+fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider, source_mode: &str) -> Result<UsageSnapshot, String> {
+    inject_context(&ctx, &provider.manifest.id, source_mode)
         .map_err(|_| "host api injection failed".to_string())?;
 
     ctx.eval::<(), _>(provider.entry_script.as_bytes())
@@ -84,7 +92,7 @@ fn extract_error_string(ctx: &Ctx<'_>) -> String {
     "The plugin failed.".to_string()
 }
 
-fn inject_context(ctx: &Ctx<'_>, plugin_id: &str) -> rquickjs::Result<()> {
+fn inject_context(ctx: &Ctx<'_>, plugin_id: &str, source_mode: &str) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     let app = Object::new(ctx.clone())?;
     app.set("version", env!("CARGO_PKG_VERSION"))?;
@@ -100,6 +108,7 @@ fn inject_context(ctx: &Ctx<'_>, plugin_id: &str) -> rquickjs::Result<()> {
 
     let probe_ctx = Object::new(ctx.clone())?;
     probe_ctx.set("nowIso", Utc::now().to_rfc3339())?;
+    probe_ctx.set("sourceMode", source_mode)?;
     probe_ctx.set("app", app)?;
     globals.set("__ai_usage_ctx", probe_ctx.clone())?;
     host_api::inject(ctx, &probe_ctx, plugin_id)?;

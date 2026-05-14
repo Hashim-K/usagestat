@@ -1,4 +1,4 @@
-use ai_usage_core::{paths, NormalizedMetrics, UsageSnapshot};
+use ai_usage_core::{NormalizedMetrics, UsageSnapshot, paths};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;

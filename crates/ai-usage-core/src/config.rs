@@ -74,6 +74,20 @@ pub enum ProviderSource {
     Custom,
 }
 
+impl ProviderSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProviderSource::Auto => "auto",
+            ProviderSource::Web => "web",
+            ProviderSource::Cli => "cli",
+            ProviderSource::Oauth => "oauth",
+            ProviderSource::Api => "api",
+            ProviderSource::Local => "local",
+            ProviderSource::Custom => "custom",
+        }
+    }
+}
+
 impl AppConfig {
     pub fn load_optional(path: &Path) -> Result<Self, ConfigError> {
         if !path.exists() {
@@ -96,6 +110,15 @@ impl AppConfig {
             .find(|provider| provider.id == provider_id)
             .map(|provider| provider.enabled)
             .unwrap_or(enabled_by_default)
+    }
+
+    pub fn source_mode(&self, provider_id: &str) -> &str {
+        self.providers
+            .iter()
+            .find(|p| p.id == provider_id)
+            .and_then(|p| p.source.as_ref())
+            .map(|s| s.as_str())
+            .unwrap_or("auto")
     }
 }
 

@@ -1,9 +1,9 @@
 use ai_usage_core::{LoadedProvider, UsageSnapshot};
 use ai_usage_plugins::probe_provider;
 use anyhow::{Context, Result};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -36,6 +36,7 @@ pub fn register_interrupt_flag() -> Result<Arc<AtomicBool>> {
 /// process exits after the batch command finishes.
 pub fn run_probe_with_timeout(
     provider: &LoadedProvider,
+    source_mode: &str,
     interrupt: Option<&Arc<AtomicBool>>,
 ) -> UsageSnapshot {
     let provider_id = provider.manifest.id.clone();
@@ -43,9 +44,10 @@ pub fn run_probe_with_timeout(
     let deadline = Instant::now() + Duration::from_secs(timeout_sec);
 
     let provider_thread = provider.clone();
+    let source_thread = source_mode.to_string();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(probe_provider(&provider_thread));
+        let _ = tx.send(probe_provider(&provider_thread, &source_thread));
     });
 
     const TICK: Duration = Duration::from_millis(200);
