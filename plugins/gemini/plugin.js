@@ -253,12 +253,23 @@
     return null
   }
 
+  function extractTier(data) {
+    if (!data || typeof data !== "object") return null
+    const paidId = data.paidTier && typeof data.paidTier.id === "string" ? data.paidTier.id : null
+    if (paidId) return paidId
+    const currentId = data.currentTier && typeof data.currentTier.id === "string" ? data.currentTier.id : null
+    if (currentId) return currentId
+    return readFirstStringDeep(data, ["tier", "userTier", "subscriptionTier"])
+  }
+
   function mapTierToPlan(tier, idTokenPayload) {
     if (!tier) return null
     const normalized = String(tier).trim().toLowerCase()
     if (normalized === "standard-tier") return "Paid"
     if (normalized === "legacy-tier") return "Legacy"
     if (normalized === "free-tier") return idTokenPayload && idTokenPayload.hd ? "Workspace" : "Free"
+    if (normalized === "google ai pro" || normalized === "g1-pro-tier") return "AI Pro"
+    if (normalized === "google ai ultra" || normalized === "g1-ultra-tier") return "AI Ultra"
     return null
   }
 
@@ -427,7 +438,7 @@
     const loadCodeAssistResult = fetchLoadCodeAssist(ctx, accessToken, creds)
     accessToken = loadCodeAssistResult.accessToken
 
-    const tier = readFirstStringDeep(loadCodeAssistResult.data, ["tier", "userTier", "subscriptionTier"])
+    const tier = extractTier(loadCodeAssistResult.data)
     const plan = mapTierToPlan(tier, idTokenPayload)
 
     const projectId = discoverProjectId(ctx, accessToken, loadCodeAssistResult.data)
