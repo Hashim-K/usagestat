@@ -1,4 +1,6 @@
 use ai_usage_core::{AppConfig, LoadedProvider, ProviderSummary, UsageCache, paths};
+
+const DASHBOARD_HTML: &str = include_str!("dashboard.html");
 use ai_usage_plugins::{discover_providers, probe_provider};
 use anyhow::{Context, Result};
 use clap::Parser;
@@ -176,6 +178,10 @@ fn route(
         return response_json(200, "OK", r#"{"status":"ok"}"#);
     }
 
+    if path == "/dashboard" || path == "/" {
+        return response_html(200, "OK", DASHBOARD_HTML);
+    }
+
     if path == "/v1/providers" {
         let providers = state.lock().expect("app state poisoned").providers.clone();
         let body = serde_json::to_string_pretty(&providers).unwrap_or_else(|_| "[]".into());
@@ -186,6 +192,10 @@ fn route(
         let snapshots = state.lock().expect("app state poisoned").cache.list();
         let body = serde_json::to_string_pretty(&snapshots).unwrap_or_else(|_| "[]".into());
         return response_json(200, "OK", &body);
+    }
+
+    if let Some(provider_id) = path.strip_prefix("/v1/cost/") {
+        return serve_cost(provider_id);
     }
 
     if let Some(provider_id) = path.strip_prefix("/v1/usage/") {
@@ -210,6 +220,44 @@ fn response_json(status: u16, reason: &str, body: &str) -> String {
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
          Access-Control-Allow-Headers: Content-Type\r\n\
+         Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn serve_cost(provider_id: &str) -> String {
+    let canonical = match provider_id {
+        "claude" | "anthropic" => "claude",
+        "codex" | "openai" | "chatgpt" => "codex",
+        _ => {
+            return response_json(
+                200,
+                "OK",
+                r#"{"error":{"code":"UNSUPPORTED","message":"Cost data not available for this provider"}}"#,
+            );
+        }
+    };
+    let output = std::process::Command::new("codexbar")
+        .args(["cost", "--provider", canonical, "--format", "json"])
+        .output();
+    match output {
+        Ok(o) if !o.stdout.is_empty() => {
+            let body = String::from_utf8_lossy(&o.stdout).into_owned();
+            response_json(200, "OK", &body)
+        }
+        _ => response_json(
+            200,
+            "OK",
+            r#"{"error":{"code":"UNSUPPORTED","message":"Cost data not available for this provider"}}"#,
+        ),
+    }
+}
+
+fn response_html(status: u16, reason: &str, body: &str) -> String {
+    format!(
+        "HTTP/1.1 {status} {reason}\r\n\
+         Connection: close\r\n\
+         Content-Type: text/html; charset=utf-8\r\n\
          Content-Length: {}\r\n\r\n{body}",
         body.len()
     )

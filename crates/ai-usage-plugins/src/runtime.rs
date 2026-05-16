@@ -74,6 +74,8 @@ fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider, source_mode: &str) ->
         plan,
         metrics,
         fetched_at: Utc::now(),
+        status_page_url: None,
+        pace: None,
     })
 }
 

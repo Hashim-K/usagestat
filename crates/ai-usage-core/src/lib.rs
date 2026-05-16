@@ -8,5 +8,5 @@ pub mod paths;
 pub use cache::UsageCache;
 pub use config::{AppConfig, ProviderConfig, ProviderSource};
 pub use manifest::{LoadedProvider, ProviderManifest, ProviderSummary};
-pub use model::{MetricLine, ProgressFormat, UsageSnapshot};
+pub use model::{MetricLine, Pace, ProgressFormat, UsageSnapshot};
 pub use normalized::NormalizedMetrics;

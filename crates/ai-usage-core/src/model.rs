@@ -44,6 +44,35 @@ pub enum MetricLine {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct Pace {
+    pub stage: String,
+    pub delta_percent: f64,
+    pub expected_used_percent: f64,
+    pub actual_used_percent: f64,
+    pub will_last_to_reset: bool,
+    pub eta_seconds: Option<f64>,
+}
+
+fn pace_stage(delta: f64) -> &'static str {
+    if delta < -20.0 {
+        "well_under"
+    } else if delta < -10.0 {
+        "under"
+    } else if delta < -3.0 {
+        "slightly_under"
+    } else if delta <= 3.0 {
+        "on_track"
+    } else if delta <= 10.0 {
+        "slightly_over"
+    } else if delta <= 20.0 {
+        "over"
+    } else {
+        "well_over"
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct UsageSnapshot {
     pub provider_id: String,
     pub display_name: String,
@@ -53,6 +82,12 @@ pub struct UsageSnapshot {
     pub plan: Option<String>,
     pub metrics: Vec<MetricLine>,
     pub fetched_at: DateTime<Utc>,
+    /// Static status page URL for the provider. null if unknown.
+    #[serde(default)]
+    pub status_page_url: Option<String>,
+    /// Pace tracking relative to reset window. null if no reset window on primary metric.
+    #[serde(default)]
+    pub pace: Option<Pace>,
 }
 
 impl UsageSnapshot {
@@ -73,6 +108,77 @@ impl UsageSnapshot {
                 subtitle: None,
             }],
             fetched_at: Utc::now(),
+            status_page_url: None,
+            pace: None,
         }
+    }
+
+    /// Compute pace from the primary percent metric's reset window.
+    /// Returns None if there is no percent metric with both resetsAt and periodDurationMs.
+    pub fn compute_pace(&self) -> Option<Pace> {
+        let now = Utc::now();
+
+        let (used, limit, resets_at, period_ms) = self.metrics.iter().find_map(|m| {
+            if let MetricLine::Progress {
+                used,
+                limit,
+                format: ProgressFormat::Percent,
+                resets_at: Some(resets_at),
+                period_duration_ms: Some(period_ms),
+                ..
+            } = m
+            {
+                if *limit > 0.0 {
+                    return Some((*used, *limit, *resets_at, *period_ms));
+                }
+            }
+            None
+        })?;
+
+        let ms_until_reset = (resets_at - now).num_milliseconds().max(0) as f64;
+        // If reset has already passed, pace is not meaningful
+        if ms_until_reset <= 0.0 {
+            return None;
+        }
+
+        let period_ms_f = period_ms as f64;
+        let ms_elapsed = period_ms_f - ms_until_reset;
+        if ms_elapsed <= 0.0 {
+            return None;
+        }
+
+        let actual_used_percent = (used / limit * 100.0).clamp(0.0, 100.0);
+        let expected_used_percent = (ms_elapsed / period_ms_f * 100.0).clamp(0.0, 100.0);
+        let delta_percent = actual_used_percent - expected_used_percent;
+        let stage = pace_stage(delta_percent);
+
+        let burn_rate_per_ms = if actual_used_percent > 0.0 {
+            actual_used_percent / ms_elapsed
+        } else {
+            0.0
+        };
+
+        let (will_last_to_reset, eta_seconds) = if burn_rate_per_ms <= 0.0 {
+            (true, None)
+        } else {
+            let remaining = 100.0 - actual_used_percent;
+            let ms_to_exhaustion = remaining / burn_rate_per_ms;
+            let will_last = ms_to_exhaustion >= ms_until_reset;
+            let eta = if stage == "well_under" {
+                None
+            } else {
+                Some(ms_to_exhaustion / 1000.0)
+            };
+            (will_last, eta)
+        };
+
+        Some(Pace {
+            stage: stage.to_string(),
+            delta_percent,
+            expected_used_percent,
+            actual_used_percent,
+            will_last_to_reset,
+            eta_seconds,
+        })
     }
 }

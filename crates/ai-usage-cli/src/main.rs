@@ -189,6 +189,9 @@ enum Command {
         /// Force refresh by ignoring cached scans. Accepted for compatibility.
         #[arg(long)]
         refresh: bool,
+        /// Number of days of history to return (JSON mode only; default 30).
+        #[arg(long, default_value_t = 30)]
+        days: u32,
     },
     /// Export usage as JSON or CSV (live probe, or read prior JSONL history)
     Export {
@@ -486,6 +489,7 @@ fn main() -> Result<()> {
             format,
             from_file,
             refresh,
+            days,
         } => {
             let selection = provider_selection(provider_ids, provider);
             if refresh && !json {
@@ -493,16 +497,21 @@ fn main() -> Result<()> {
                     "ai-usage: --refresh is accepted for compatibility; live snapshot cost has no cache to bypass"
                 );
             }
-            run_cost(
-                &providers,
-                &config,
-                &selection.ids,
-                cli.all || selection.include_disabled,
-                format,
-                from_file,
-                json,
-                cli.plain,
-            )
+            let json_output = json || matches!(format, CostFormat::Json);
+            if json_output && from_file.is_none() {
+                run_cost_historical(&selection.ids, days)
+            } else {
+                run_cost(
+                    &providers,
+                    &config,
+                    &selection.ids,
+                    cli.all || selection.include_disabled,
+                    format,
+                    from_file,
+                    json,
+                    cli.plain,
+                )
+            }
         }
         Command::Export {
             format,
@@ -697,7 +706,9 @@ fn run_probe(
             eprintln!("ai-usage:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
         }
         let source = resolve_source_mode(cli_source, web, &provider.manifest.id, config);
-        let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
+        let mut snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
+        snap.status_page_url = status_page_url_for(&provider.manifest.id);
+        snap.pace = snap.compute_pace();
         if save {
             let rec = history::record_from_snapshot(&snap);
             if let Err(e) = history::append_jsonl(&rec) {
@@ -989,6 +1000,237 @@ fn fetch_provider_status(provider: &LoadedProvider) -> ProviderStatus {
             error: Some(error.to_string()),
         },
     }
+}
+
+// ── cost historical ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CostHistoricalResponse {
+    provider: String,
+    currency: &'static str,
+    daily: Vec<DailyEntry>,
+    totals: DailyTotals,
+    period_days: u32,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DailyEntry {
+    date: String,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    total_tokens: u64,
+    total_cost: f64,
+    model_breakdowns: Vec<ModelBreakdown>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DailyTotals {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_creation_tokens: u64,
+    total_tokens: u64,
+    total_cost: f64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelBreakdown {
+    model_name: String,
+    cost: f64,
+    total_tokens: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct CostUnsupportedResponse {
+    error: CostUnsupportedError,
+}
+
+#[derive(Debug, Serialize)]
+struct CostUnsupportedError {
+    code: &'static str,
+    message: &'static str,
+}
+
+fn unsupported_cost_response() -> CostUnsupportedResponse {
+    CostUnsupportedResponse {
+        error: CostUnsupportedError {
+            code: "UNSUPPORTED",
+            message: "Cost data not available for this provider",
+        },
+    }
+}
+
+fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
+    let targets: Vec<&str> = if provider_ids.is_empty() {
+        vec!["claude", "codex"]
+    } else {
+        provider_ids
+            .iter()
+            .map(|id| match normalize_provider_id(id) {
+                "openai" | "chatgpt" => "codex",
+                other => other,
+            })
+            .collect()
+    };
+
+    let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(days as i64);
+
+    let mut results: Vec<serde_json::Value> = Vec::new();
+    for &target in &targets {
+        let canonical = match target {
+            "claude" | "anthropic" => "claude",
+            "codex" | "openai" | "chatgpt" => "codex",
+            _ => {
+                results.push(serde_json::to_value(unsupported_cost_response())?);
+                continue;
+            }
+        };
+
+        let output = std::process::Command::new("codexbar")
+            .args(["cost", "--provider", canonical, "--format", "json"])
+            .output();
+
+        let output = match output {
+            Err(_) => {
+                results.push(serde_json::to_value(unsupported_cost_response())?);
+                continue;
+            }
+            Ok(o) => o,
+        };
+
+        let raw: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+            Ok(v) => v,
+            Err(_) => {
+                results.push(serde_json::to_value(unsupported_cost_response())?);
+                continue;
+            }
+        };
+
+        // codexbar outputs a JSON array; take the first element
+        let entry = match raw.as_array().and_then(|a| a.first()) {
+            Some(e) => e,
+            None => {
+                results.push(serde_json::to_value(unsupported_cost_response())?);
+                continue;
+            }
+        };
+
+        // If the entry itself has an error field, it failed
+        if entry.get("error").is_some() {
+            results.push(serde_json::to_value(unsupported_cost_response())?);
+            continue;
+        }
+
+        let daily_raw = entry.get("daily").and_then(|d| d.as_array());
+        let mut daily: Vec<DailyEntry> = daily_raw
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|d| {
+                        let date = d.get("date")?.as_str()?.to_string();
+                        // Filter to requested window
+                        if let Ok(parsed) = date.parse::<chrono::NaiveDate>() {
+                            if parsed <= cutoff {
+                                return None;
+                            }
+                        }
+                        let input_tokens = d
+                            .get("inputTokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let output_tokens = d
+                            .get("outputTokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let cache_read_tokens = d
+                            .get("cacheReadTokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let cache_creation_tokens = d
+                            .get("cacheCreationTokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        let total_tokens = d
+                            .get("totalTokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(
+                                input_tokens
+                                    + output_tokens
+                                    + cache_read_tokens
+                                    + cache_creation_tokens,
+                            );
+                        let total_cost = d
+                            .get("totalCost")
+                            .and_then(|v| v.as_f64())
+                            .unwrap_or(0.0);
+                        let model_breakdowns = d
+                            .get("modelBreakdowns")
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|m| {
+                                        Some(ModelBreakdown {
+                                            model_name: m
+                                                .get("modelName")?
+                                                .as_str()?
+                                                .to_string(),
+                                            cost: m
+                                                .get("cost")
+                                                .and_then(|v| v.as_f64())
+                                                .unwrap_or(0.0),
+                                            total_tokens: m
+                                                .get("totalTokens")
+                                                .and_then(|v| v.as_u64())
+                                                .unwrap_or(0),
+                                        })
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        Some(DailyEntry {
+                            date,
+                            input_tokens,
+                            output_tokens,
+                            cache_read_tokens,
+                            cache_creation_tokens,
+                            total_tokens,
+                            total_cost,
+                            model_breakdowns,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        // Sort oldest → newest
+        daily.sort_by(|a, b| a.date.cmp(&b.date));
+
+        // Build totals from the filtered daily entries
+        let totals = DailyTotals {
+            input_tokens: daily.iter().map(|d| d.input_tokens).sum(),
+            output_tokens: daily.iter().map(|d| d.output_tokens).sum(),
+            cache_read_tokens: daily.iter().map(|d| d.cache_read_tokens).sum(),
+            cache_creation_tokens: daily.iter().map(|d| d.cache_creation_tokens).sum(),
+            total_tokens: daily.iter().map(|d| d.total_tokens).sum(),
+            total_cost: daily.iter().map(|d| d.total_cost).sum(),
+        };
+
+        results.push(serde_json::to_value(CostHistoricalResponse {
+            provider: canonical.to_string(),
+            currency: "USD",
+            daily,
+            totals,
+            period_days: days,
+        })?);
+    }
+
+    println!("{}", serde_json::to_string_pretty(&results)?);
+    Ok(())
 }
 
 // ── cost ─────────────────────────────────────────────────────────────────────
@@ -1451,6 +1693,18 @@ fn format_modes(s: &ProviderSummary) -> String {
         format!(" (auto={})", s.auto_mode)
     };
     format!("{}{}", s.supported_modes.join(", "), auto_suffix)
+}
+
+fn status_page_url_for(provider_id: &str) -> Option<String> {
+    let url = match provider_id {
+        "claude" | "anthropic" => "https://status.anthropic.com/",
+        "openai" | "codex" | "chatgpt" => "https://status.openai.com/",
+        "github-copilot" | "copilot" => "https://www.githubstatus.com/",
+        "gemini" | "google" => "https://status.cloud.google.com/",
+        "cursor" => "https://www.cursor-status.com/",
+        _ => return None,
+    };
+    Some(url.to_string())
 }
 
 fn normalize_provider_id(id: &str) -> &str {
