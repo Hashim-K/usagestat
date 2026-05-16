@@ -1,4 +1,4 @@
-globalThis.__ai_usage_plugin = {
+globalThis.__usagestat_plugin = {
   probe(ctx) {
     const apiKey = readApiKey(ctx);
     const apiBase = readApiBase(ctx);

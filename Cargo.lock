@@ -35,12 +35,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-usage-cli"
+name = "usagestat-cli"
 version = "0.1.0"
 dependencies = [
  "aes",
- "ai-usage-core",
- "ai-usage-plugins",
+ "usagestat-core",
+ "usagestat-plugins",
  "anyhow",
  "cbc",
  "chrono",
@@ -59,7 +59,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-usage-core"
+name = "usagestat-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -71,11 +71,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-usage-daemon"
+name = "usagestat-daemon"
 version = "0.1.0"
 dependencies = [
- "ai-usage-core",
- "ai-usage-plugins",
+ "usagestat-core",
+ "usagestat-plugins",
  "anyhow",
  "clap",
  "env_logger",
@@ -84,10 +84,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "ai-usage-plugins"
+name = "usagestat-plugins"
 version = "0.1.0"
 dependencies = [
- "ai-usage-core",
+ "usagestat-core",
  "anyhow",
  "chrono",
  "log",

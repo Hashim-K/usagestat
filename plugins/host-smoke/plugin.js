@@ -1,10 +1,10 @@
-globalThis.__ai_usage_plugin = {
+globalThis.__usagestat_plugin = {
   probe(ctx) {
     ctx.host.log.info("running host API smoke probe");
 
     const home = ctx.host.fs.homeDir || "";
     const hasHome = home ? ctx.host.fs.exists(home) : false;
-    const pluginDir = ctx.host.env.get("AI_USAGE_PLUGIN_DIR") || "";
+    const pluginDir = ctx.host.env.get("USAGESTAT_PLUGIN_DIR") || "";
 
     return {
       displayName: "Host API Smoke",

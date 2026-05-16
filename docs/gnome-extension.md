@@ -1,7 +1,7 @@
 # GNOME Extension — Migration Guide
 
 This guide covers migrating a GNOME Shell extension from a CodexBar / CrossUsage
-backend to `ai-usage-backend`.
+backend to `usagestat`.
 
 The key change: instead of shelling out to a CLI tool on every panel refresh,
 the extension talks to a local HTTP daemon that handles polling in the background.
@@ -15,10 +15,10 @@ The extension becomes a pure display layer.
 GNOME Shell extension
         │  HTTP (loopback)
         ▼
-ai-usage-daemon  (127.0.0.1:6736)
+usagestatd  (127.0.0.1:6736)
         │  JS plugin runtime
         ▼
-Provider plugins  (~/.config/ai-usage/plugins)
+Provider plugins  (~/.config/usagestat/plugins)
 ```
 
 The daemon polls all enabled providers on a configurable interval (default 60 s)
@@ -32,22 +32,22 @@ cache on demand — no blocking, no per-refresh network calls.
 ### Build and install
 
 ```bash
-cargo build --release -p ai-usage-daemon -p ai-usage-cli
-install -Dm755 target/release/ai-usage-daemon ~/.local/bin/ai-usage-daemon
-install -Dm755 target/release/ai-usage          ~/.local/bin/ai-usage
+cargo build --release -p usagestat-daemon -p usagestat-cli
+install -Dm755 target/release/usagestatd ~/.local/bin/usagestatd
+install -Dm755 target/release/usagestat          ~/.local/bin/usagestat
 ```
 
 ### Run manually
 
 ```bash
-ai-usage-daemon
+usagestatd
 # or with overrides:
-ai-usage-daemon --bind 127.0.0.1:6736 --refresh-sec 30
+usagestatd --bind 127.0.0.1:6736 --refresh-sec 30
 ```
 
 ### Autostart with systemd user service
 
-Create `~/.config/systemd/user/ai-usage-daemon.service`:
+Create `~/.config/systemd/user/usagestatd.service`:
 
 ```ini
 [Unit]
@@ -55,7 +55,7 @@ Description=AI Usage Daemon
 After=network.target
 
 [Service]
-ExecStart=%h/.local/bin/ai-usage-daemon
+ExecStart=%h/.local/bin/usagestatd
 Restart=on-failure
 RestartSec=5
 
@@ -65,7 +65,7 @@ WantedBy=default.target
 
 ```bash
 systemctl --user daemon-reload
-systemctl --user enable --now ai-usage-daemon
+systemctl --user enable --now usagestatd
 ```
 
 ---
@@ -258,7 +258,7 @@ function primaryPercent(snapshot) {
 
 ## Provider Configuration
 
-Enable providers in `~/.config/ai-usage/config.toml`:
+Enable providers in `~/.config/usagestat/config.toml`:
 
 ```toml
 refreshSec = 60
@@ -318,8 +318,8 @@ async function triggerRefresh() {
 
 ## Migration Checklist
 
-- [ ] Install `ai-usage-daemon` and start it (or enable the systemd unit)
-- [ ] Enable desired providers in `~/.config/ai-usage/config.toml`
+- [ ] Install `usagestatd` and start it (or enable the systemd unit)
+- [ ] Enable desired providers in `~/.config/usagestat/config.toml`
 - [ ] Replace any `GLib.spawn_command_line_sync('codexbar ...')` calls with
       `fetchUsage()` against the daemon
 - [ ] Map `MetricLine` types to your existing UI components

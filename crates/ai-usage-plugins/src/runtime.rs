@@ -1,7 +1,9 @@
 use crate::host_api;
-use ai_usage_core::{LoadedProvider, MetricLine, ProgressFormat, ProviderManifest, UsageSnapshot, paths};
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
+use usagestat_core::{
+    LoadedProvider, MetricLine, ProgressFormat, ProviderManifest, UsageSnapshot, paths,
+};
 
 pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnapshot {
     if let Some(error) = provider.manifest.check_mode(source_mode) {
@@ -38,7 +40,11 @@ pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnap
     })
 }
 
-fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider, source_mode: &str) -> Result<UsageSnapshot, String> {
+fn run_in_context(
+    ctx: Ctx<'_>,
+    provider: &LoadedProvider,
+    source_mode: &str,
+) -> Result<UsageSnapshot, String> {
     inject_context(&ctx, &provider.manifest, source_mode)
         .map_err(|_| "host api injection failed".to_string())?;
 
@@ -47,14 +53,15 @@ fn run_in_context(ctx: Ctx<'_>, provider: &LoadedProvider, source_mode: &str) ->
 
     let globals = ctx.globals();
     let plugin_obj: Object = globals
-        .get("__ai_usage_plugin")
+        .get("__usagestat_plugin")
+        .or_else(|_| globals.get("__ai_usage_plugin"))
         .or_else(|_| globals.get("__openusage_plugin"))
         .map_err(|_| "missing plugin export".to_string())?;
     let probe_fn: rquickjs::Function = plugin_obj
         .get("probe")
         .map_err(|_| "missing probe()".to_string())?;
     let probe_ctx: Value = globals
-        .get("__ai_usage_ctx")
+        .get("__usagestat_ctx")
         .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
     let result: Object = probe_fn
         .call((probe_ctx,))
@@ -94,7 +101,11 @@ fn extract_error_string(ctx: &Ctx<'_>) -> String {
     "The plugin failed.".to_string()
 }
 
-fn inject_context(ctx: &Ctx<'_>, manifest: &ProviderManifest, source_mode: &str) -> rquickjs::Result<()> {
+fn inject_context(
+    ctx: &Ctx<'_>,
+    manifest: &ProviderManifest,
+    source_mode: &str,
+) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     let app = Object::new(ctx.clone())?;
     app.set("version", env!("CARGO_PKG_VERSION"))?;
@@ -115,6 +126,7 @@ fn inject_context(ctx: &Ctx<'_>, manifest: &ProviderManifest, source_mode: &str)
         probe_ctx.set("webUrl", web_url.as_str())?;
     }
     probe_ctx.set("app", app)?;
+    globals.set("__usagestat_ctx", probe_ctx.clone())?;
     globals.set("__ai_usage_ctx", probe_ctx.clone())?;
     host_api::inject(ctx, &probe_ctx, &manifest.id)?;
     Ok(())

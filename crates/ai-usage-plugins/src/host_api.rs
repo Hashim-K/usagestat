@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 const ENV_ALLOWLIST: &[&str] = &[
+    "USAGESTAT_PLUGIN_DIR",
     "AI_USAGE_PLUGIN_DIR",
     "ARK_API_KEY",
     "AUGMENT_ACCESS_TOKEN",
@@ -273,8 +274,8 @@ fn patch_http_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     ctx.eval::<(), _>(
         r#"
         (function() {
-            var raw = __ai_usage_ctx.host.http._requestRaw;
-            __ai_usage_ctx.host.http.request = function(req) {
+            var raw = __usagestat_ctx.host.http._requestRaw;
+            __usagestat_ctx.host.http.request = function(req) {
                 var response = raw(JSON.stringify({
                     url: req.url,
                     method: req.method || "GET",
@@ -284,9 +285,9 @@ fn patch_http_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                 }));
                 return JSON.parse(response);
             };
-            if (__ai_usage_ctx.host.command && __ai_usage_ctx.host.command._runRaw) {
-                var runRaw = __ai_usage_ctx.host.command._runRaw;
-                __ai_usage_ctx.host.command.run = function(req) {
+            if (__usagestat_ctx.host.command && __usagestat_ctx.host.command._runRaw) {
+                var runRaw = __usagestat_ctx.host.command._runRaw;
+                __usagestat_ctx.host.command.run = function(req) {
                     var response = runRaw(JSON.stringify({
                         program: req.program,
                         args: req.args || [],
@@ -305,7 +306,7 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     ctx.eval::<(), _>(
         r#"
         (function() {
-            var ctx = __ai_usage_ctx;
+            var ctx = __usagestat_ctx;
 
             ctx.line = {
                 text: function(opts) {

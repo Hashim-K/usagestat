@@ -2,11 +2,6 @@ mod auth_cookies;
 mod batch_probe;
 mod history;
 
-use ai_usage_core::{
-    AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
-    UsageSnapshot, paths,
-};
-use ai_usage_plugins::discover_providers;
 use anyhow::{Context, Result};
 use chrono::{Local, Utc};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -15,10 +10,15 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::PathBuf;
 use tabled::{Table, Tabled, settings::Style};
+use usagestat_core::{
+    AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
+    UsageSnapshot, paths,
+};
+use usagestat_plugins::discover_providers;
 
 #[derive(Debug, Parser)]
-#[command(name = "ai-usage")]
-#[command(about = "AI usage backend CLI")]
+#[command(name = "usagestat")]
+#[command(about = "agent usage backend CLI")]
 #[command(version)]
 struct Cli {
     #[command(subcommand)]
@@ -86,7 +86,7 @@ enum Command {
         /// Fetch all token accounts. Accepted for compatibility.
         #[arg(long = "all-accounts")]
         all_accounts: bool,
-        /// Append results to ~/.local/share/ai-usage/history.jsonl
+        /// Append results to ~/.local/share/usagestat/history.jsonl
         #[arg(long)]
         save: bool,
         /// Fetch and print provider status-page state when available
@@ -98,7 +98,7 @@ enum Command {
         /// Alias for --source web.
         #[arg(long)]
         web: bool,
-        /// Accepted for compatibility; provider web timeouts use AI_USAGE_PROBE_TIMEOUT_SEC today.
+        /// Accepted for compatibility; provider web timeouts use USAGESTAT_PROBE_TIMEOUT_SEC today.
         #[arg(long = "web-timeout")]
         web_timeout: Option<f64>,
         /// Accepted for compatibility.
@@ -139,7 +139,7 @@ enum Command {
         /// Fetch all token accounts. Accepted for compatibility.
         #[arg(long = "all-accounts")]
         all_accounts: bool,
-        /// Append results to ~/.local/share/ai-usage/history.jsonl
+        /// Append results to ~/.local/share/usagestat/history.jsonl
         #[arg(long)]
         save: bool,
         /// Fetch and print provider status-page state when available
@@ -151,7 +151,7 @@ enum Command {
         /// Alias for --source web.
         #[arg(long)]
         web: bool,
-        /// Accepted for compatibility; provider web timeouts use AI_USAGE_PROBE_TIMEOUT_SEC today.
+        /// Accepted for compatibility; provider web timeouts use USAGESTAT_PROBE_TIMEOUT_SEC today.
         #[arg(long = "web-timeout")]
         web_timeout: Option<f64>,
         /// Accepted for compatibility.
@@ -248,10 +248,10 @@ enum ConfigCommand {
 enum CacheCommand {
     /// Clear cached snapshots and/or saved history
     Clear {
-        /// Clear ~/.local/share/ai-usage/snapshots.json
+        /// Clear ~/.local/share/usagestat/snapshots.json
         #[arg(long)]
         snapshots: bool,
-        /// Clear ~/.local/share/ai-usage/history.jsonl
+        /// Clear ~/.local/share/usagestat/history.jsonl
         #[arg(long)]
         history: bool,
         /// Clear all backend caches
@@ -494,7 +494,7 @@ fn main() -> Result<()> {
             let selection = provider_selection(provider_ids, provider);
             if refresh && !json {
                 eprintln!(
-                    "ai-usage: --refresh is accepted for compatibility; live snapshot cost has no cache to bypass"
+                    "usagestat: --refresh is accepted for compatibility; live snapshot cost has no cache to bypass"
                 );
             }
             let json_output = json || matches!(format, CostFormat::Json);
@@ -686,7 +686,7 @@ fn run_probe(
 ) -> Result<()> {
     let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
     if selected.is_empty() {
-        eprintln!("ai-usage: no providers to probe");
+        eprintln!("usagestat: no providers to probe");
         return Ok(());
     }
 
@@ -695,7 +695,7 @@ fn run_probe(
     let tmax = batch_probe::probe_timeout_secs();
     if !json {
         eprintln!(
-            "ai-usage: probing {n} provider(s)… (up to {tmax}s each; AI_USAGE_PROBE_TIMEOUT_SEC to override)"
+            "usagestat: probing {n} provider(s)… (up to {tmax}s each; USAGESTAT_PROBE_TIMEOUT_SEC to override)"
         );
     }
 
@@ -703,7 +703,7 @@ fn run_probe(
     let mut statuses = Vec::new();
     for (i, provider) in selected.iter().enumerate() {
         if !json {
-            eprintln!("ai-usage:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
+            eprintln!("usagestat:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
         }
         let source = resolve_source_mode(cli_source, web, &provider.manifest.id, config);
         let mut snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
@@ -712,7 +712,7 @@ fn run_probe(
         if save {
             let rec = history::record_from_snapshot(&snap);
             if let Err(e) = history::append_jsonl(&rec) {
-                eprintln!("ai-usage: warning: failed to save history: {e}");
+                eprintln!("usagestat: warning: failed to save history: {e}");
             }
         }
         if include_status {
@@ -892,7 +892,7 @@ fn run_status(
 ) -> Result<()> {
     let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
     if selected.is_empty() {
-        eprintln!("ai-usage: no providers to check");
+        eprintln!("usagestat: no providers to check");
         return Ok(());
     }
 
@@ -1139,14 +1139,10 @@ fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
                                 return None;
                             }
                         }
-                        let input_tokens = d
-                            .get("inputTokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let output_tokens = d
-                            .get("outputTokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
+                        let input_tokens =
+                            d.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
+                        let output_tokens =
+                            d.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
                         let cache_read_tokens = d
                             .get("cacheReadTokens")
                             .and_then(|v| v.as_u64())
@@ -1155,19 +1151,13 @@ fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
                             .get("cacheCreationTokens")
                             .and_then(|v| v.as_u64())
                             .unwrap_or(0);
-                        let total_tokens = d
-                            .get("totalTokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(
-                                input_tokens
-                                    + output_tokens
-                                    + cache_read_tokens
-                                    + cache_creation_tokens,
-                            );
-                        let total_cost = d
-                            .get("totalCost")
-                            .and_then(|v| v.as_f64())
-                            .unwrap_or(0.0);
+                        let total_tokens = d.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(
+                            input_tokens
+                                + output_tokens
+                                + cache_read_tokens
+                                + cache_creation_tokens,
+                        );
+                        let total_cost = d.get("totalCost").and_then(|v| v.as_f64()).unwrap_or(0.0);
                         let model_breakdowns = d
                             .get("modelBreakdowns")
                             .and_then(|v| v.as_array())
@@ -1175,10 +1165,7 @@ fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
                                 arr.iter()
                                     .filter_map(|m| {
                                         Some(ModelBreakdown {
-                                            model_name: m
-                                                .get("modelName")?
-                                                .as_str()?
-                                                .to_string(),
+                                            model_name: m.get("modelName")?.as_str()?.to_string(),
                                             cost: m
                                                 .get("cost")
                                                 .and_then(|v| v.as_f64())
@@ -1271,7 +1258,7 @@ fn run_cost(
     } else {
         let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
         if selected.is_empty() {
-            eprintln!("ai-usage: no providers for cost");
+            eprintln!("usagestat: no providers for cost");
             return Ok(());
         }
         let interrupt = batch_probe::register_interrupt_flag()?;
@@ -1420,18 +1407,18 @@ fn run_export(
     } else {
         let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
         if selected.is_empty() {
-            eprintln!("ai-usage: no providers to export");
+            eprintln!("usagestat: no providers to export");
             return Ok(());
         }
 
         let interrupt = batch_probe::register_interrupt_flag()?;
         let n = selected.len();
         let tmax = batch_probe::probe_timeout_secs();
-        eprintln!("ai-usage: probing {n} provider(s) for export… (up to {tmax}s each)");
+        eprintln!("usagestat: probing {n} provider(s) for export… (up to {tmax}s each)");
 
         let mut recs = Vec::new();
         for (i, provider) in selected.iter().enumerate() {
-            eprintln!("ai-usage:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
+            eprintln!("usagestat:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
             let source = config.source_mode(&provider.manifest.id).to_string();
             let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
             recs.push(history::record_from_snapshot(&snap));
@@ -1527,12 +1514,12 @@ fn run_cache_clear(
 
     if provider.is_some() && !json {
         eprintln!(
-            "ai-usage: --provider cache scoping is accepted for compatibility; backend caches are not per-provider yet"
+            "usagestat: --provider cache scoping is accepted for compatibility; backend caches are not per-provider yet"
         );
     }
     if cookies && !json {
         eprintln!(
-            "ai-usage: --cookies is accepted for compatibility; no backend cookie cache exists yet"
+            "usagestat: --cookies is accepted for compatibility; no backend cookie cache exists yet"
         );
     }
 
@@ -1607,7 +1594,11 @@ fn clear_file(cache: &str, path: PathBuf) -> CacheClearResult {
 
 // ── auth ─────────────────────────────────────────────────────────────────────
 
-fn run_auth_import_cookies(providers: &[LoadedProvider], provider: String, json: bool) -> Result<()> {
+fn run_auth_import_cookies(
+    providers: &[LoadedProvider],
+    provider: String,
+    json: bool,
+) -> Result<()> {
     let matched = providers
         .iter()
         .find(|p| p.manifest.id.eq_ignore_ascii_case(&provider));
@@ -1734,22 +1725,22 @@ fn warn_unsupported_usage_compat(
     }
     if web_timeout.is_some() {
         eprintln!(
-            "ai-usage: --web-timeout is accepted for compatibility; use AI_USAGE_PROBE_TIMEOUT_SEC for backend probe timeouts"
+            "usagestat: --web-timeout is accepted for compatibility; use USAGESTAT_PROBE_TIMEOUT_SEC for backend probe timeouts"
         );
     }
     if account.is_some() || account_index.is_some() || all_accounts {
         eprintln!(
-            "ai-usage: account selection flags are accepted for compatibility; token account routing is not implemented yet"
+            "usagestat: account selection flags are accepted for compatibility; token account routing is not implemented yet"
         );
     }
     if web_debug_dump_html || antigravity_plan_debug || augment_debug {
         eprintln!(
-            "ai-usage: provider debug flags are accepted for compatibility; debug payloads are not implemented yet"
+            "usagestat: provider debug flags are accepted for compatibility; debug payloads are not implemented yet"
         );
     }
     if no_credits {
         eprintln!(
-            "ai-usage: --no-credits is accepted for compatibility; credit visibility is currently provider-plugin controlled"
+            "usagestat: --no-credits is accepted for compatibility; credit visibility is currently provider-plugin controlled"
         );
     }
 }

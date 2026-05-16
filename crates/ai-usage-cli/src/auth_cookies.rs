@@ -68,7 +68,9 @@ impl Drop for TempCookieDb {
 
 /// Extract the registrable hostname from a URL (e.g. "https://claude.ai/foo" → "claude.ai").
 fn host_from_url(url: &str) -> Option<String> {
-    let after_scheme = url.strip_prefix("https://").or_else(|| url.strip_prefix("http://"))?;
+    let after_scheme = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
     let host = after_scheme.split('/').next()?;
     let host = host.split(':').next()?; // strip port if any
     if host.is_empty() {
@@ -78,7 +80,10 @@ fn host_from_url(url: &str) -> Option<String> {
     }
 }
 
-pub fn import_cookies(provider_id: &str, web_url: &str) -> Result<CookieImportResult, CookieImportError> {
+pub fn import_cookies(
+    provider_id: &str,
+    web_url: &str,
+) -> Result<CookieImportResult, CookieImportError> {
     let Some(host) = host_from_url(web_url) else {
         return Err(CookieImportError {
             error: "INVALID_WEB_URL".to_string(),
@@ -177,7 +182,10 @@ fn discover_profiles() -> Vec<ProfileCandidate> {
     profiles
 }
 
-fn read_profile_cookies(profile: &ProfileCandidate, host: &str) -> Result<Vec<CookieRecord>, String> {
+fn read_profile_cookies(
+    profile: &ProfileCandidate,
+    host: &str,
+) -> Result<Vec<CookieRecord>, String> {
     let temp = copy_cookie_db(&profile.cookies_db)?;
     let conn = Connection::open_with_flags(
         &temp.db,
@@ -237,7 +245,8 @@ fn copy_cookie_db(path: &Path) -> Result<TempCookieDb, String> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .unwrap_or(0);
-    let dir = std::env::temp_dir().join(format!("ai-usage-cookies-{}-{stamp}", std::process::id()));
+    let dir =
+        std::env::temp_dir().join(format!("usagestat-cookies-{}-{stamp}", std::process::id()));
     fs::create_dir_all(&dir).map_err(|error| format!("create temp dir: {error}"))?;
     let db = dir.join("Cookies");
     fs::copy(path, &db).map_err(|error| format!("copy cookie db: {error}"))?;

@@ -1,11 +1,11 @@
 [package]
-name = "ai-usage-core"
+name = "usagestat-core"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "ai_usage_core"
+name = "usagestat_core"
 path = "src/lib.rs"
 
 [dependencies]

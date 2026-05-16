@@ -1,16 +1,16 @@
 [package]
-name = "ai-usage-daemon"
+name = "usagestat-daemon"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [[bin]]
-name = "ai-usage-daemon"
+name = "usagestatd"
 path = "src/main.rs"
 
 [dependencies]
-ai-usage-core = { path = "../ai-usage-core" }
-ai-usage-plugins = { path = "../ai-usage-plugins" }
+usagestat-core = { path = "../ai-usage-core" }
+usagestat-plugins = { path = "../ai-usage-plugins" }
 anyhow.workspace = true
 clap.workspace = true
 env_logger.workspace = true

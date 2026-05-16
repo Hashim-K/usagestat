@@ -1,7 +1,6 @@
-use ai_usage_core::{AppConfig, LoadedProvider, ProviderSummary, UsageCache, paths};
+use usagestat_core::{AppConfig, LoadedProvider, ProviderSummary, UsageCache, paths};
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
-use ai_usage_plugins::{discover_providers, probe_provider};
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::io::{Read, Write};
@@ -11,10 +10,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use usagestat_plugins::{discover_providers, probe_provider};
 
 #[derive(Debug, Parser)]
-#[command(name = "ai-usage-daemon")]
-#[command(about = "Local AI usage polling daemon")]
+#[command(name = "usagestatd")]
+#[command(about = "Local agent usage polling daemon")]
 struct Cli {
     #[arg(long, default_value = "127.0.0.1:6736")]
     bind: String,

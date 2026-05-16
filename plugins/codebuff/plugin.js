@@ -55,7 +55,7 @@
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      bodyText: JSON.stringify({ fingerprintId: "ai-usage-probe" }),
+      bodyText: JSON.stringify({ fingerprintId: "usagestat-probe" }),
       timeoutMs: 30000,
     });
 

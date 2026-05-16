@@ -1,6 +1,6 @@
 # AI Usage Backend Feature Roadmap
 
-This backend should be a reusable local service for AI usage data, with a CLI,
+This backend should be a reusable local service for agent usage data, with a CLI,
 daemon, plugin host, and stable HTTP contract that any desktop shell can consume.
 
 ## 1. Core Data Contract
@@ -41,10 +41,10 @@ daemon, plugin host, and stable HTTP contract that any desktop shell can consume
 
 ## 4. Config And Persistence
 
-- `~/.config/ai-usage/config.toml` loading.
+- `~/.config/usagestat/config.toml` loading.
 - Explicit `--config` override for CLI and daemon.
-- Plugin directories from config, CLI flags, and `AI_USAGE_PLUGIN_DIR`.
-- Cache directory under `~/.local/share/ai-usage`.
+- Plugin directories from config, CLI flags, and `USAGESTAT_PLUGIN_DIR`.
+- Cache directory under `~/.local/share/usagestat`.
 - Persist last successful snapshots.
 - Persist provider history as JSONL for trends.
 - Config migration/versioning.
@@ -56,17 +56,17 @@ daemon, plugin host, and stable HTTP contract that any desktop shell can consume
 
 ## 5. CLI
 
-- `ai-usage list` for known providers.
-- `ai-usage usage [providers...]` / `ai-usage probe [providers...]` for one-shot usage snapshots.
-- `ai-usage status [providers...]` and `usage --status` for provider status pages.
-- `ai-usage cost [providers...]` for normalized cost/token data, with native local log scanners as the next parity step.
-- `ai-usage auth import-cookies --provider codex` for Linux Chromium-family
+- `usagestat list` for known providers.
+- `usagestat usage [providers...]` / `usagestat probe [providers...]` for one-shot usage snapshots.
+- `usagestat status [providers...]` and `usage --status` for provider status pages.
+- `usagestat cost [providers...]` for normalized cost/token data, with native local log scanners as the next parity step.
+- `usagestat auth import-cookies --provider codex` for Linux Chromium-family
   ChatGPT/OpenAI cookie import.
-- `ai-usage export --format json|csv`.
-- `ai-usage daemon` or separate daemon binary.
-- `ai-usage config validate|dump|init`.
-- `ai-usage plugin validate|test`.
-- `ai-usage cache inspect|clear`.
+- `usagestat export --format json|csv`.
+- `usagestat daemon` or separate daemon binary.
+- `usagestat config validate|dump|init`.
+- `usagestat plugin validate|test`.
+- `usagestat cache inspect|clear`.
 - CodexBar-compatible provider selection flags: `--source`, `--account`, `--account-index`, `--all-accounts`.
 - Human output for terminals and JSON output for scripts.
 - Exit codes that distinguish config, provider, timeout, and runtime failures.

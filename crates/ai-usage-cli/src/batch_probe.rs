@@ -1,14 +1,15 @@
-use ai_usage_core::{LoadedProvider, UsageSnapshot};
-use ai_usage_plugins::probe_provider;
 use anyhow::{Context, Result};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
+use usagestat_core::{LoadedProvider, UsageSnapshot};
+use usagestat_plugins::probe_provider;
 
 pub fn probe_timeout_secs() -> u64 {
-    std::env::var("AI_USAGE_PROBE_TIMEOUT_SEC")
+    std::env::var("USAGESTAT_PROBE_TIMEOUT_SEC")
+        .or_else(|_| std::env::var("AI_USAGE_PROBE_TIMEOUT_SEC"))
         .ok()
         .and_then(|s| s.parse().ok())
         .filter(|&s: &u64| s > 0)
@@ -55,7 +56,7 @@ pub fn run_probe_with_timeout(
     loop {
         if let Some(flag) = interrupt {
             if flag.load(Ordering::SeqCst) {
-                eprintln!("\nai-usage: interrupted");
+                eprintln!("\nusagestat: interrupted");
                 std::process::exit(130);
             }
         }
@@ -63,8 +64,8 @@ pub fn run_probe_with_timeout(
         let now = Instant::now();
         if now >= deadline {
             eprintln!(
-                "ai-usage: probe timed out after {timeout_sec}s for `{provider_id}` \
-                 (set AI_USAGE_PROBE_TIMEOUT_SEC to override)"
+                "usagestat: probe timed out after {timeout_sec}s for `{provider_id}` \
+                 (set USAGESTAT_PROBE_TIMEOUT_SEC to override)"
             );
             return UsageSnapshot::error(
                 &provider_id,

@@ -1,28 +1,28 @@
-# ai-usage-backend
+# usagestat
 
-Backend for local AI usage data.
+Backend for local agent usage data.
 
 This starts from CrossUsage's architecture, but uses separate project names and
 contracts:
 
-- `ai-usage-core`: shared models, config, paths, cache.
-- `ai-usage-plugins`: JavaScript provider plugin loader/runtime.
-- `ai-usage-cli`: scriptable CLI.
-- `ai-usage-daemon`: local polling daemon with an HTTP API.
+- `usagestat-core`: shared models, config, paths, cache.
+- `usagestat-plugins`: JavaScript provider plugin loader/runtime.
+- `usagestat-cli`: scriptable CLI.
+- `usagestat-daemon`: local polling daemon with an HTTP API.
 
 ## Development
 
 ```bash
-cargo run -p ai-usage-cli -- list
-cargo run -p ai-usage-cli -- --json usage mock
-cargo run -p ai-usage-cli -- usage --provider claude --save
-cargo run -p ai-usage-cli -- status claude codex
-cargo run -p ai-usage-cli -- export --format csv
-cargo run -p ai-usage-cli -- auth import-cookies --provider codex --format json
-cargo run -p ai-usage-cli -- config validate
-cargo run -p ai-usage-cli -- cache clear --history
-cargo run -p ai-usage-cli -- plugin validate
-cargo run -p ai-usage-daemon
+cargo run -p usagestat-cli -- list
+cargo run -p usagestat-cli -- --json usage mock
+cargo run -p usagestat-cli -- usage --provider claude --save
+cargo run -p usagestat-cli -- status claude codex
+cargo run -p usagestat-cli -- export --format csv
+cargo run -p usagestat-cli -- auth import-cookies --provider codex --format json
+cargo run -p usagestat-cli -- config validate
+cargo run -p usagestat-cli -- cache clear --history
+cargo run -p usagestat-cli -- plugin validate
+cargo run -p usagestat-daemon
 curl http://127.0.0.1:6736/v1/usage
 ```
 
@@ -30,8 +30,8 @@ CLI usage docs: [docs/cli.md](docs/cli.md).
 
 Plugins are discovered from:
 
-1. `AI_USAGE_PLUGIN_DIR`
-2. `~/.config/ai-usage/plugins`
+1. `USAGESTAT_PLUGIN_DIR`
+2. `~/.config/usagestat/plugins`
 3. `./plugins`
 
 Bundled providers:
@@ -39,7 +39,7 @@ Bundled providers:
 - `mock`: development fixture.
 - `host-smoke`: disabled fixture for host API checks.
 - `claude`: Claude Code OAuth usage.
-- `codex`: Codex/OpenAI usage from Codex CLI OAuth auth.
+- `codex`: Codex/Openagent usage from Codex CLI OAuth auth.
 - `copilot`: GitHub Copilot usage via `COPILOT_API_TOKEN`, `GITHUB_TOKEN`, or `GH_TOKEN`.
 - `gemini`: Gemini CLI OAuth quota.
 - `openrouter`: OpenRouter API credits via `OPENROUTER_API_KEY`.
@@ -49,13 +49,13 @@ Bundled providers:
 Default config path:
 
 ```text
-~/.config/ai-usage/config.toml
+~/.config/usagestat/config.toml
 ```
 
 Default cache path:
 
 ```text
-~/.local/share/ai-usage/snapshots.json
+~/.local/share/usagestat/snapshots.json
 ```
 
 Example:
@@ -98,8 +98,8 @@ customCommand = "/path/to/usage-script --json"
 Both binaries accept overrides:
 
 ```bash
-cargo run -p ai-usage-cli -- --config ./config.toml --plugin-dir ./plugins list
-cargo run -p ai-usage-daemon -- --config ./config.toml --refresh-sec 30
+cargo run -p usagestat-cli -- --config ./config.toml --plugin-dir ./plugins list
+cargo run -p usagestat-daemon -- --config ./config.toml --refresh-sec 30
 ```
 
 HTTP endpoints currently implemented:
@@ -111,7 +111,7 @@ HTTP endpoints currently implemented:
 
 ## Plugin Host API
 
-Provider plugins export `globalThis.__ai_usage_plugin.probe(ctx)`.
+Provider plugins export `globalThis.__usagestat_plugin.probe(ctx)`.
 
 Available context:
 

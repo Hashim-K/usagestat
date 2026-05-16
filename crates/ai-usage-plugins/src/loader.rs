@@ -1,7 +1,7 @@
-use ai_usage_core::{LoadedProvider, ProviderManifest};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
+use usagestat_core::{LoadedProvider, ProviderManifest};
 
 pub fn discover_providers(plugin_dirs: &[PathBuf]) -> Vec<LoadedProvider> {
     let mut providers = Vec::new();

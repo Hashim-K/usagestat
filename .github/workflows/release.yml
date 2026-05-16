@@ -1,0 +1,103 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            artifact: usagestat-linux-x86_64
+          - target: aarch64-unknown-linux-gnu
+            artifact: usagestat-linux-aarch64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install cross
+        run: |
+          if ! command -v cross >/dev/null 2>&1; then
+            cargo install cross --git https://github.com/cross-rs/cross
+          fi
+
+      - name: Build
+        run: cross build --release --locked --target ${{ matrix.target }} -p usagestat-cli
+
+      - name: Package
+        run: |
+          set -euo pipefail
+          mkdir -p dist package
+          cp target/${{ matrix.target }}/release/usagestat dist/${{ matrix.artifact }}
+          chmod 755 dist/${{ matrix.artifact }}
+
+          cp dist/${{ matrix.artifact }} package/usagestat
+          cp LICENSE package/LICENSE
+          tar -C package -czf dist/${{ matrix.artifact }}.tar.gz usagestat LICENSE
+
+          (cd dist && sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256)
+          (cd dist && sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256)
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            dist/${{ matrix.artifact }}
+            dist/${{ matrix.artifact }}.sha256
+            dist/${{ matrix.artifact }}.tar.gz
+            dist/${{ matrix.artifact }}.tar.gz.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/usagestat-linux-x86_64
+            dist/usagestat-linux-x86_64.sha256
+            dist/usagestat-linux-x86_64.tar.gz
+            dist/usagestat-linux-x86_64.tar.gz.sha256
+            dist/usagestat-linux-aarch64
+            dist/usagestat-linux-aarch64.sha256
+            dist/usagestat-linux-aarch64.tar.gz
+            dist/usagestat-linux-aarch64.tar.gz.sha256
+          generate_release_notes: true

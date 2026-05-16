@@ -1,9 +1,9 @@
-use ai_usage_core::{NormalizedMetrics, UsageSnapshot, paths};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
+use usagestat_core::{NormalizedMetrics, UsageSnapshot, paths};
 
 /// Flat export record: one row per probe snapshot.
 #[derive(Debug, Clone, Serialize, Deserialize)]

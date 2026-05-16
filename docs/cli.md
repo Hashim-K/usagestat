@@ -1,6 +1,6 @@
 # AI Usage CLI
 
-`ai-usage` is a scriptable command line interface for discovering provider
+`usagestat` is a scriptable command line interface for discovering provider
 plugins, probing live usage, checking provider status pages, exporting usage
 snapshots, and managing backend config/cache state.
 
@@ -13,97 +13,97 @@ families where the backend already has equivalent data.
 From a checkout, run the binary through Cargo:
 
 ```bash
-cargo run -p ai-usage-cli -- list
+cargo run -p usagestat-cli -- list
 ```
 
-For repeated use, build or install the CLI and then run `ai-usage` directly:
+For repeated use, build or install the CLI and then run `usagestat` directly:
 
 ```bash
-cargo build -p ai-usage-cli
-./target/debug/ai-usage list
+cargo build -p usagestat-cli
+./target/debug/usagestat list
 ```
 
 ```bash
 cargo install --path crates/ai-usage-cli
-ai-usage list
+usagestat list
 ```
 
-When running through Cargo, everything after `--` is passed to `ai-usage`.
+When running through Cargo, everything after `--` is passed to `usagestat`.
 
 ## Quick Start
 
 List discovered providers:
 
 ```bash
-ai-usage list
+usagestat list
 ```
 
 List enabled/disabled state for specific providers:
 
 ```bash
-ai-usage list claude codex
+usagestat list claude codex
 ```
 
 Check live status pages for specific providers:
 
 ```bash
-ai-usage status claude codex
+usagestat status claude codex
 ```
 
 Probe every enabled provider:
 
 ```bash
-ai-usage usage
+usagestat usage
 ```
 
 Probe one provider:
 
 ```bash
-ai-usage usage claude
-ai-usage usage --provider claude
+usagestat usage claude
+usagestat usage --provider claude
 ```
 
 Probe multiple providers:
 
 ```bash
-ai-usage usage claude codex gemini
+usagestat usage claude codex gemini
 ```
 
 Emit JSON for scripts:
 
 ```bash
-ai-usage --json usage claude
+usagestat --json usage claude
 ```
 
 Save a history record while probing:
 
 ```bash
-ai-usage usage claude --save
+usagestat usage claude --save
 ```
 
 Export current live data as CSV:
 
 ```bash
-ai-usage export --format csv
+usagestat export --format csv
 ```
 
 Export saved history:
 
 ```bash
-ai-usage export --from-file ~/.local/share/ai-usage/history.jsonl --format csv
+usagestat export --from-file ~/.local/share/usagestat/history.jsonl --format csv
 ```
 
 Validate or dump config:
 
 ```bash
-ai-usage config validate
-ai-usage config dump
+usagestat config validate
+usagestat config dump
 ```
 
 Import ChatGPT/OpenAI browser cookies for Codex web usage:
 
 ```bash
-ai-usage auth import-cookies --provider codex --format json
+usagestat auth import-cookies --provider codex --format json
 ```
 
 ## Global Options
@@ -129,9 +129,9 @@ Global options can be placed before or after the subcommand.
 Examples:
 
 ```bash
-ai-usage --config ./config.toml list
-ai-usage --plugin-dir ./plugins --plugin-dir ~/ai-usage-plugins list
-ai-usage --all probe openrouter
+usagestat --config ./config.toml list
+usagestat --plugin-dir ./plugins --plugin-dir ~/usagestat-plugins list
+usagestat --all probe openrouter
 ```
 
 ## Commands
@@ -141,20 +141,20 @@ ai-usage --all probe openrouter
 Runs provider plugins and prints live usage snapshots.
 
 ```bash
-ai-usage usage [PROVIDER_IDS]...
+usagestat usage [PROVIDER_IDS]...
 ```
 
 If no provider IDs are supplied, `usage` runs every enabled provider. Each
 provider has its own timeout. The default timeout is 120 seconds.
 
 ```bash
-AI_USAGE_PROBE_TIMEOUT_SEC=30 ai-usage usage claude
+USAGESTAT_PROBE_TIMEOUT_SEC=30 usagestat usage claude
 ```
 
 Options:
 
 ```text
---save              Append results to ~/.local/share/ai-usage/history.jsonl.
+--save              Append results to ~/.local/share/usagestat/history.jsonl.
 --status            Fetch provider status-page state and include it with output.
 --provider <ID>     Provider to query. Also accepts all enabled providers, or both.
 --format text|json  Output format.
@@ -181,15 +181,15 @@ z-ai       -> zai
 Examples:
 
 ```bash
-ai-usage usage
-ai-usage --provider claude
-ai-usage --format json --provider all
-ai-usage usage claude codex
-ai-usage usage --provider all
-ai-usage usage --provider both
-ai-usage --json usage gemini
-ai-usage usage claude --save
-ai-usage usage claude --status
+usagestat usage
+usagestat --provider claude
+usagestat --format json --provider all
+usagestat usage claude codex
+usagestat usage --provider all
+usagestat usage --provider both
+usagestat --json usage gemini
+usagestat usage claude --save
+usagestat usage claude --status
 ```
 
 ### `probe`
@@ -198,7 +198,7 @@ Alias-compatible usage probing command. It supports the same options as
 `usage`.
 
 ```bash
-ai-usage probe [PROVIDER_IDS]...
+usagestat probe [PROVIDER_IDS]...
 ```
 
 ### `list`
@@ -206,10 +206,10 @@ ai-usage probe [PROVIDER_IDS]...
 Shows every discovered provider and whether it is enabled by config.
 
 ```bash
-ai-usage list
-ai-usage list claude codex
-ai-usage list --plain
-ai-usage list --json
+usagestat list
+usagestat list claude codex
+usagestat list --plain
+usagestat list --json
 ```
 
 This command does not contact provider APIs. It only loads plugin manifests and
@@ -220,17 +220,17 @@ config. Pass provider IDs to show only those providers.
 Fetches provider status-page state without probing usage.
 
 ```bash
-ai-usage status [PROVIDER_IDS]...
+usagestat status [PROVIDER_IDS]...
 ```
 
 The command uses `Status` links in plugin manifests and reads the common
 Statuspage endpoint at `/api/v2/status.json`.
 
 ```bash
-ai-usage status claude codex
-ai-usage status --provider claude
-ai-usage status claude codex --plain
-ai-usage status claude codex --json
+usagestat status claude codex
+usagestat status --provider claude
+usagestat status claude codex --plain
+usagestat status claude codex --json
 ```
 
 ### `cost`
@@ -239,7 +239,7 @@ Prints normalized cost/token data from live snapshots, or from saved history
 when `--from-file` is supplied.
 
 ```bash
-ai-usage cost [PROVIDER_IDS]...
+usagestat cost [PROVIDER_IDS]...
 ```
 
 Options:
@@ -256,9 +256,9 @@ Rust cost scanners for Claude/Codex logs should replace this with true local
 cost parity.
 
 ```bash
-ai-usage cost claude codex
-ai-usage cost --provider claude
-ai-usage cost --from-file ~/.local/share/ai-usage/history.jsonl --format csv
+usagestat cost claude codex
+usagestat cost --provider claude
+usagestat cost --from-file ~/.local/share/usagestat/history.jsonl --format csv
 ```
 
 ### `export`
@@ -266,7 +266,7 @@ ai-usage cost --from-file ~/.local/share/ai-usage/history.jsonl --format csv
 Exports either live probe results or records from a saved JSONL history file.
 
 ```bash
-ai-usage export [PROVIDER_IDS]...
+usagestat export [PROVIDER_IDS]...
 ```
 
 Options:
@@ -279,7 +279,7 @@ Options:
 When `--from-file` is used, provider IDs filter the file contents:
 
 ```bash
-ai-usage export --from-file ~/.local/share/ai-usage/history.jsonl claude codex
+usagestat export --from-file ~/.local/share/usagestat/history.jsonl claude codex
 ```
 
 CSV output columns:
@@ -291,9 +291,9 @@ ts,provider_id,display_name,plan,primary_percent,input_tokens,output_tokens,cost
 Examples:
 
 ```bash
-ai-usage export --format json
-ai-usage export claude --format csv
-ai-usage export --from-file ~/.local/share/ai-usage/history.jsonl --format csv
+usagestat export --format json
+usagestat export claude --format csv
+usagestat export --from-file ~/.local/share/usagestat/history.jsonl --format csv
 ```
 
 ### `plugin validate`
@@ -302,8 +302,8 @@ Loads all discovered plugin manifests and reports the providers that can be
 validated by the loader.
 
 ```bash
-ai-usage plugin validate
-ai-usage plugin validate --json
+usagestat plugin validate
+usagestat plugin validate --json
 ```
 
 This is useful after adding a plugin directory or editing a manifest.
@@ -314,8 +314,8 @@ Parses the configured TOML file and reports success. Parse errors are reported
 before the command runs.
 
 ```bash
-ai-usage config validate
-ai-usage config validate --json
+usagestat config validate
+usagestat config validate --json
 ```
 
 ### `config dump`
@@ -323,7 +323,7 @@ ai-usage config validate --json
 Prints the normalized config as JSON.
 
 ```bash
-ai-usage config dump
+usagestat config dump
 ```
 
 ### `cache clear`
@@ -331,20 +331,20 @@ ai-usage config dump
 Clears backend cache files.
 
 ```bash
-ai-usage cache clear --snapshots
-ai-usage cache clear --history
-ai-usage cache clear --cookies
-ai-usage cache clear --cost
-ai-usage cache clear --cookies --provider claude
-ai-usage cache clear --all
-ai-usage cache clear --all --json
+usagestat cache clear --snapshots
+usagestat cache clear --history
+usagestat cache clear --cookies
+usagestat cache clear --cost
+usagestat cache clear --cookies --provider claude
+usagestat cache clear --all
+usagestat cache clear --all --json
 ```
 
 Current backend caches:
 
 ```text
-snapshots   ~/.local/share/ai-usage/snapshots.json
-history     ~/.local/share/ai-usage/history.jsonl
+snapshots   ~/.local/share/usagestat/snapshots.json
+history     ~/.local/share/usagestat/history.jsonl
 ```
 
 ### `auth import-cookies`
@@ -354,7 +354,7 @@ config fields. The command currently supports Codex/OpenAI cookies from
 Chromium-family browser profiles on Linux: Chrome, Brave, and Chromium.
 
 ```bash
-ai-usage auth import-cookies --provider codex --format json
+usagestat auth import-cookies --provider codex --format json
 ```
 
 The importer copies locked SQLite cookie databases to a temporary directory
@@ -388,19 +388,19 @@ Plugins are discovered in this order:
 
 1. Directories passed with `--plugin-dir`
 2. `pluginDirs` from the config file
-3. `AI_USAGE_PLUGIN_DIR`
-4. `~/.config/ai-usage/plugins`
+3. `USAGESTAT_PLUGIN_DIR`
+4. `~/.config/usagestat/plugins`
 5. `./plugins`
 
 Duplicate directory paths are ignored after their first occurrence.
 
-When running `ai-usage` outside the repository, `./plugins` is relative to your
+When running `usagestat` outside the repository, `./plugins` is relative to your
 current shell directory. For an installed user-local binary, either copy plugins
-to `~/.config/ai-usage/plugins`, set `AI_USAGE_PLUGIN_DIR`, or add the repo's
+to `~/.config/usagestat/plugins`, set `USAGESTAT_PLUGIN_DIR`, or add the repo's
 plugin directory to config:
 
 ```toml
-pluginDirs = ["/mnt/shared/Git/ai-usage-backend/plugins"]
+pluginDirs = ["/mnt/shared/Git/usagestat/plugins"]
 ```
 
 ## Config
@@ -408,7 +408,7 @@ pluginDirs = ["/mnt/shared/Git/ai-usage-backend/plugins"]
 The default config path is:
 
 ```text
-~/.config/ai-usage/config.toml
+~/.config/usagestat/config.toml
 ```
 
 Minimal example:
@@ -523,20 +523,20 @@ plugin.
 Use `--json` for complete normalized snapshots:
 
 ```bash
-ai-usage --json usage claude | jq '.[0].metrics'
+usagestat --json usage claude | jq '.[0].metrics'
 ```
 
 Use `export` for one flat record per provider snapshot:
 
 ```bash
-ai-usage export claude codex --format csv > usage.csv
+usagestat export claude codex --format csv > usage.csv
 ```
 
 Use `probe --save` from cron or systemd timers, then export historical records:
 
 ```bash
-ai-usage usage claude codex --save
-ai-usage export --from-file ~/.local/share/ai-usage/history.jsonl --format json
+usagestat usage claude codex --save
+usagestat export --from-file ~/.local/share/usagestat/history.jsonl --format json
 ```
 
 ## CodexBar CLI Parity
@@ -544,12 +544,12 @@ ai-usage export --from-file ~/.local/share/ai-usage/history.jsonl --format json
 Implemented command families:
 
 ```text
-CodexBar usage          ai-usage usage / ai-usage probe
-CodexBar usage --status ai-usage usage --status, or ai-usage status
-CodexBar cost           ai-usage cost, backed by normalized snapshots/history
-CodexBar config validate ai-usage config validate
-CodexBar config dump    ai-usage config dump
-CodexBar cache clear    ai-usage cache clear
+CodexBar usage          usagestat usage / usagestat probe
+CodexBar usage --status usagestat usage --status, or usagestat status
+CodexBar cost           usagestat cost, backed by normalized snapshots/history
+CodexBar config validate usagestat config validate
+CodexBar config dump    usagestat config dump
+CodexBar cache clear    usagestat cache clear
 ```
 
 Known gaps that need native backend work:
@@ -568,30 +568,30 @@ Cookie cache clearing is accepted but no backend cookie cache exists yet
 Show discovered providers and enabled state:
 
 ```bash
-ai-usage list --all
+usagestat list --all
 ```
 
 Validate plugin manifests:
 
 ```bash
-ai-usage plugin validate
+usagestat plugin validate
 ```
 
 Use a shorter timeout while debugging a slow provider:
 
 ```bash
-AI_USAGE_PROBE_TIMEOUT_SEC=10 ai-usage usage claude
+USAGESTAT_PROBE_TIMEOUT_SEC=10 usagestat usage claude
 ```
 
 Probe a disabled provider explicitly:
 
 ```bash
-ai-usage --all usage openrouter
-ai-usage --all --provider openrouter
+usagestat --all usage openrouter
+usagestat --all --provider openrouter
 ```
 
 Run with a known plugin directory:
 
 ```bash
-ai-usage --plugin-dir ./plugins list
+usagestat --plugin-dir ./plugins list
 ```

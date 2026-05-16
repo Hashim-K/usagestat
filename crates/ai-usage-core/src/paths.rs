@@ -5,13 +5,13 @@ use crate::AppConfig;
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("ai-usage")
+        .join("usagestat")
 }
 
 pub fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("ai-usage")
+        .join("usagestat")
 }
 
 pub fn config_file() -> PathBuf {
@@ -25,7 +25,9 @@ pub fn cache_file() -> PathBuf {
 pub fn default_plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 
-    if let Ok(value) = std::env::var("AI_USAGE_PLUGIN_DIR") {
+    if let Ok(value) =
+        std::env::var("USAGESTAT_PLUGIN_DIR").or_else(|_| std::env::var("AI_USAGE_PLUGIN_DIR"))
+    {
         dirs.push(PathBuf::from(value));
     }
 
@@ -47,7 +49,8 @@ fn dedupe_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
     for dir in dirs {
         let canonical = std::fs::canonicalize(&dir).unwrap_or_else(|_| dir.clone());
         let already_seen = out.iter().any(|existing| {
-            let existing_canonical = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.clone());
+            let existing_canonical =
+                std::fs::canonicalize(existing).unwrap_or_else(|_| existing.clone());
             existing_canonical == canonical
         });
         if !already_seen {
