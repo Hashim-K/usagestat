@@ -8,10 +8,10 @@ class Usagestat < Formula
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/Hashim-K/usagestat/releases/download/v#{version}/usagestat-linux-aarch64.tar.gz"
-      sha256 "REPLACE_WITH_LINUX_AARCH64_TARBALL_SHA256"
+      sha256 "d0a16fbbda7e06d7c3347b3ac56ebbe285727343fe4f4b40c90df52bd198e75f"
     else
       url "https://github.com/Hashim-K/usagestat/releases/download/v#{version}/usagestat-linux-x86_64.tar.gz"
-      sha256 "REPLACE_WITH_LINUX_X86_64_TARBALL_SHA256"
+      sha256 "53a6c30fc482330b60b889aa5e53dbbdaecef5931f792bf9381ee875f0ba6950"
     end
   end
 

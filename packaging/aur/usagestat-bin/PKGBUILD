@@ -11,7 +11,7 @@ depends=("glibc")
 provides=("usagestat")
 conflicts=("usagestat")
 source_x86_64=("usagestat-${pkgver}-linux-x86_64.tar.gz::${url}/releases/download/v${pkgver}/usagestat-linux-x86_64.tar.gz")
-sha256sums_x86_64=("REPLACE_WITH_RELEASE_SHA256")
+sha256sums_x86_64=("53a6c30fc482330b60b889aa5e53dbbdaecef5931f792bf9381ee875f0ba6950")
 
 package() {
   install -Dm755 "${srcdir}/usagestat" "${pkgdir}/usr/bin/usagestat"
