@@ -1,5 +1,5 @@
 Name:           usagestat
-Version:        1.0.0
+Version:        1.0.1
 Release:        1%{?dist}
 Summary:        Scriptable CLI for local agent usage data
 
@@ -33,5 +33,8 @@ cargo test --locked -p usagestat-cli
 %{_bindir}/usagestat
 
 %changelog
+* Mon May 18 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.1-1
+- Install rustls ring crypto provider before plugin HTTP requests
+
 * Sat May 16 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.0-1
 - Initial RPM package

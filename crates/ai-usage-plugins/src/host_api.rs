@@ -502,6 +502,8 @@ fn rusqlite_value_to_json(v: rusqlite::types::Value) -> JsonValue {
 }
 
 fn execute_http_request(request: HttpRequest) -> Result<HttpResponse, reqwest::Error> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_millis(request.timeout_ms))
         .redirect(reqwest::redirect::Policy::none())
