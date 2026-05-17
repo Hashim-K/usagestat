@@ -36,7 +36,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-cli"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "aes",
  "usagestat-core",
@@ -60,7 +60,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-core"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-daemon"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "usagestat-core",
  "usagestat-plugins",
@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-plugins"
-version = "0.1.0"
+version = "1.0.0"
 dependencies = [
  "usagestat-core",
  "anyhow",

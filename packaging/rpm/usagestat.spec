@@ -1,5 +1,5 @@
 Name:           usagestat
-Version:        0.1.0
+Version:        1.0.0
 Release:        1%{?dist}
 Summary:        Scriptable CLI for local agent usage data
 
@@ -33,5 +33,5 @@ cargo test --locked -p usagestat-cli
 %{_bindir}/usagestat
 
 %changelog
-* Sat May 16 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 0.1.0-1
+* Sat May 16 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.0-1
 - Initial RPM package

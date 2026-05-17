@@ -1,7 +1,7 @@
 # Maintainer: Hashim-K <Hashim-K@users.noreply.github.com>
 
 pkgname=usagestat-bin
-pkgver=0.1.0
+pkgver=1.0.0
 pkgrel=1
 pkgdesc="Scriptable CLI for local agent usage data"
 arch=("x86_64")

@@ -1,7 +1,7 @@
 class Usagestat < Formula
   desc "Scriptable CLI for local agent usage data"
   homepage "https://github.com/Hashim-K/usagestat"
-  version "0.1.0"
+  version "1.0.0"
   license "MIT"
   depends_on :linux
 
