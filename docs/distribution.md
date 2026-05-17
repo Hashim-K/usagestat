@@ -17,6 +17,19 @@ Artifacts are written to:
 dist/releases/v1.0.0/
 ```
 
+Build local distro packages:
+
+```bash
+tools/publish/scripts/local-deb-build.sh
+tools/publish/scripts/local-rpm-build.sh
+```
+
+Packages are written to:
+
+```text
+dist/packages/v1.0.0/
+```
+
 Build publisher containers:
 
 ```bash
