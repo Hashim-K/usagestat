@@ -113,11 +113,17 @@ HTTP endpoints currently implemented:
 
 Provider plugins export `globalThis.__usagestat_plugin.probe(ctx)`.
 
+A copyable plugin template lives at `templates/provider-plugin`. It includes
+examples for `api`, `oauth`, `local`, `cli`, and `web` source modes.
+
 Available context:
 
 - `ctx.nowIso`
+- `ctx.sourceMode`
 - `ctx.app.version`
 - `ctx.app.platform`
+- `ctx.app.appDataDir`
+- `ctx.app.pluginDataDir`
 - `ctx.host.log.info|warn|error(message)`
 - `ctx.host.env.get(name)` for allowlisted variables
 - `ctx.host.fs.homeDir`
@@ -125,6 +131,7 @@ Available context:
 - `ctx.host.fs.readText(path)`
 - `ctx.host.fs.listDir(path)`
 - `ctx.host.http.request({ url, method, headers, bodyText, timeoutMs })`
+- `ctx.host.command.run({ program, args, timeoutMs })` for allowlisted commands
 
 Host HTTP responses use:
 

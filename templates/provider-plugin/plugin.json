@@ -1,0 +1,16 @@
+{
+  "id": "custom-provider-template",
+  "name": "Custom Provider Template",
+  "entry": "plugin.js",
+  "enabledByDefault": false,
+  "version": "0.1.0",
+  "supportedModes": ["api", "oauth", "local", "cli", "web"],
+  "autoMode": "api",
+  "webUrl": "https://example.com",
+  "links": [
+    {
+      "label": "Plugin API docs",
+      "url": "https://example.com/docs"
+    }
+  ]
+}
