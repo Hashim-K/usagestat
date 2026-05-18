@@ -70,6 +70,14 @@ struct HttpResponse {
     body_text: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HttpsTestResult {
+    pub url: String,
+    pub status: u16,
+    pub body_bytes: usize,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct CommandRequest {
@@ -104,6 +112,23 @@ pub fn inject<'js>(
     patch_http_wrapper(ctx)?;
     inject_utils(ctx)?;
     Ok(())
+}
+
+pub fn test_https_request(url: &str, timeout_ms: u64) -> Result<HttpsTestResult, String> {
+    let response = execute_http_request(HttpRequest {
+        url: url.to_string(),
+        method: "GET".to_string(),
+        headers: HashMap::new(),
+        body_text: None,
+        timeout_ms,
+    })
+    .map_err(|error| error.to_string())?;
+
+    Ok(HttpsTestResult {
+        url: url.to_string(),
+        status: response.status,
+        body_bytes: response.body_text.len(),
+    })
 }
 
 fn inject_command<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {

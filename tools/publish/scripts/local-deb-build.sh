@@ -24,6 +24,9 @@ docker run --rm -i \
     set -euo pipefail
     export CARGO_TARGET_DIR=/tmp/usagestat-target
     cargo deb -p usagestat-cli --output /tmp/usagestat.deb
+    dpkg -i /tmp/usagestat.deb
+    usagestat --version
+    usagestat test https
     cp /tmp/usagestat.deb /work/'"$dist_dir"'/usagestat_'"$version"'_amd64.deb
   '
 

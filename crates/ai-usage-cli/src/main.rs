@@ -14,7 +14,7 @@ use usagestat_core::{
     AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
     UsageSnapshot, paths,
 };
-use usagestat_plugins::discover_providers;
+use usagestat_plugins::{discover_providers, test_https_request};
 
 #[derive(Debug, Parser)]
 #[command(name = "usagestat")]
@@ -221,6 +221,10 @@ enum Command {
         #[command(subcommand)]
         command: AuthCommand,
     },
+    Test {
+        #[command(subcommand)]
+        command: TestCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -266,6 +270,19 @@ enum CacheCommand {
         /// CodexBar-compatible provider cache scope. No-op until per-provider caches exist.
         #[arg(long)]
         provider: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum TestCommand {
+    /// Make a real HTTPS request through the plugin host HTTP stack
+    Https {
+        /// URL to request.
+        #[arg(long, default_value = "https://example.com")]
+        url: String,
+        /// Request timeout in milliseconds.
+        #[arg(long, default_value_t = 10_000)]
+        timeout_ms: u64,
     },
 }
 
@@ -560,6 +577,9 @@ fn main() -> Result<()> {
             provider,
             json || matches!(format, OutputFormat::Json),
         ),
+        Command::Test {
+            command: TestCommand::Https { url, timeout_ms },
+        } => run_test_https(&url, timeout_ms, json),
     }
 }
 
@@ -589,6 +609,7 @@ fn effective_args() -> Vec<OsString> {
                     | "config"
                     | "cache"
                     | "auth"
+                    | "test"
                     | "help"
             )
         })
@@ -667,6 +688,19 @@ fn run_list(
     let mut table = Table::new(rows);
     table.with(Style::rounded());
     println!("{table}");
+    Ok(())
+}
+
+fn run_test_https(url: &str, timeout_ms: u64, json: bool) -> Result<()> {
+    let result = test_https_request(url, timeout_ms).map_err(anyhow::Error::msg)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&result)?);
+    } else {
+        println!(
+            "HTTPS OK: {} -> {} ({} bytes)",
+            result.url, result.status, result.body_bytes
+        );
+    }
     Ok(())
 }
 

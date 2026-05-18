@@ -31,6 +31,9 @@ docker run --rm -i \
       --define "_topdir $topdir" \
       --define "_sourcedir $topdir/SOURCES" \
       packaging/rpm/usagestat.spec
+    dnf install -y "$topdir"/RPMS/*/usagestat-'"$version"'-*.rpm
+    usagestat --version
+    usagestat test https
     cp "$topdir"/RPMS/*/*.rpm /work/'"$dist_dir"'/
   '
 

@@ -24,6 +24,14 @@ tools/publish/scripts/local-deb-build.sh
 tools/publish/scripts/local-rpm-build.sh
 ```
 
+Both package builders install the resulting package inside the publisher
+container and run:
+
+```bash
+usagestat --version
+usagestat test https
+```
+
 Packages are written to:
 
 ```text
