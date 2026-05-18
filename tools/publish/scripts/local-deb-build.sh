@@ -26,6 +26,8 @@ docker run --rm -i \
     cargo deb -p usagestat-cli --output /tmp/usagestat.deb
     dpkg -i /tmp/usagestat.deb
     usagestat --version
+    (cd /tmp && usagestat --json list --provider codex | tee /tmp/usagestat-providers.json)
+    grep -q "\"id\": \"codex\"" /tmp/usagestat-providers.json
     usagestat test https
     cp /tmp/usagestat.deb /work/'"$dist_dir"'/usagestat_'"$version"'_amd64.deb
   '

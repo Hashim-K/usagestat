@@ -24,6 +24,8 @@ cargo build --release --locked -p usagestat-cli
 
 %install
 install -Dm0755 target/release/usagestat %{buildroot}%{_bindir}/usagestat
+mkdir -p %{buildroot}%{_datadir}/usagestat/plugins
+cp -a plugins/. %{buildroot}%{_datadir}/usagestat/plugins/
 
 %check
 cargo test --locked -p usagestat-cli
@@ -31,6 +33,7 @@ cargo test --locked -p usagestat-cli
 %files
 %license LICENSE
 %{_bindir}/usagestat
+%{_datadir}/usagestat/plugins
 
 %changelog
 * Mon May 18 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.2-1

@@ -43,4 +43,5 @@ priority = "optional"
 depends = "$auto"
 assets = [
     ["target/release/usagestat", "usr/bin/", "755"],
+    ["../../plugins/**/*", "usr/share/usagestat/plugins/", "644"],
 ]

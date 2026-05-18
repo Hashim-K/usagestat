@@ -32,8 +32,21 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
     }
 
     dirs.push(config_dir().join("plugins"));
+    if let Some(prefix) = install_prefix() {
+        dirs.push(prefix.join("share/usagestat/plugins"));
+        dirs.push(prefix.join("lib/usagestat/plugins"));
+    }
     dirs.push(PathBuf::from("plugins"));
     dirs
+}
+
+fn install_prefix() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bin_dir = exe.parent()?;
+    if bin_dir.file_name().is_some_and(|name| name == "bin") {
+        return bin_dir.parent().map(PathBuf::from);
+    }
+    None
 }
 
 pub fn plugin_dirs(config: &AppConfig, extra_dirs: &[PathBuf]) -> Vec<PathBuf> {

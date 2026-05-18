@@ -49,18 +49,21 @@ jobs:
           fi
 
       - name: Build
-        run: cross build --release --locked --target ${{ matrix.target }} -p usagestat-cli
+        run: |
+          CARGO_TARGET_DIR=target/cross/${{ matrix.target }} \
+            cross build --release --locked --target ${{ matrix.target }} -p usagestat-cli
 
       - name: Package
         run: |
           set -euo pipefail
           mkdir -p dist package
-          cp target/${{ matrix.target }}/release/usagestat dist/${{ matrix.artifact }}
+          cp target/cross/${{ matrix.target }}/${{ matrix.target }}/release/usagestat dist/${{ matrix.artifact }}
           chmod 755 dist/${{ matrix.artifact }}
 
           cp dist/${{ matrix.artifact }} package/usagestat
           cp LICENSE package/LICENSE
-          tar -C package -czf dist/${{ matrix.artifact }}.tar.gz usagestat LICENSE
+          cp -a plugins package/plugins
+          tar -C package -czf dist/${{ matrix.artifact }}.tar.gz usagestat LICENSE plugins
 
           (cd dist && sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256)
           (cd dist && sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256)

@@ -44,15 +44,17 @@ declare -A targets=(
 for target in "${!targets[@]}"; do
   artifact="${targets[$target]}"
   package_dir="$(mktemp -d)"
+  target_dir="target/cross/${target}"
 
-  cross build --release --locked --target "$target" -p usagestat-cli
+  CARGO_TARGET_DIR="$target_dir" cross build --release --locked --target "$target" -p usagestat-cli
 
-  cp "target/${target}/release/usagestat" "${dist_dir}/${artifact}"
+  cp "${target_dir}/${target}/release/usagestat" "${dist_dir}/${artifact}"
   chmod 755 "${dist_dir}/${artifact}"
 
   cp "${dist_dir}/${artifact}" "${package_dir}/usagestat"
   cp LICENSE "${package_dir}/LICENSE"
-  tar -C "$package_dir" -czf "${dist_dir}/${artifact}.tar.gz" usagestat LICENSE
+  cp -a plugins "${package_dir}/plugins"
+  tar -C "$package_dir" -czf "${dist_dir}/${artifact}.tar.gz" usagestat LICENSE plugins
 
   (cd "$dist_dir" && sha256sum "$artifact" > "${artifact}.sha256")
   (cd "$dist_dir" && sha256sum "${artifact}.tar.gz" > "${artifact}.tar.gz.sha256")

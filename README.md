@@ -114,7 +114,9 @@ HTTP endpoints currently implemented:
 Provider plugins export `globalThis.__usagestat_plugin.probe(ctx)`.
 
 A copyable plugin template lives at `templates/provider-plugin`. It includes
-examples for `api`, `oauth`, `local`, `cli`, and `web` source modes.
+examples for `api`, `oauth`, `local`, `cli`, and `web` source modes. Dev-only
+example providers live under `templates/dev-providers` and are not loaded or
+packaged as production providers.
 
 Available context:
 
