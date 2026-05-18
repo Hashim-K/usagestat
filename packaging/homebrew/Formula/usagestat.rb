@@ -1,22 +1,23 @@
 class Usagestat < Formula
   desc "Scriptable CLI for local agent usage data"
   homepage "https://github.com/Hashim-K/usagestat"
-  version "1.0.0"
+  version "1.0.2"
   license "MIT"
   depends_on :linux
 
   on_linux do
     if Hardware::CPU.arm?
       url "https://github.com/Hashim-K/usagestat/releases/download/v#{version}/usagestat-linux-aarch64.tar.gz"
-      sha256 "d0a16fbbda7e06d7c3347b3ac56ebbe285727343fe4f4b40c90df52bd198e75f"
+      sha256 "bd6e75663973f4535494604987b88cb3928b7ead2de8a7bf269b144e80b866c9"
     else
       url "https://github.com/Hashim-K/usagestat/releases/download/v#{version}/usagestat-linux-x86_64.tar.gz"
-      sha256 "53a6c30fc482330b60b889aa5e53dbbdaecef5931f792bf9381ee875f0ba6950"
+      sha256 "50aa23ee61a3a19e38ef63d253d1ac7228c511f615ca0f9197553bc3cfc0a530"
     end
   end
 
   def install
     bin.install "usagestat"
+    (share/"usagestat").install "plugins"
   end
 
   test do
