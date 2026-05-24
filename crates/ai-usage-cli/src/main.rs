@@ -11,10 +11,12 @@ use std::fs;
 use std::path::PathBuf;
 use tabled::{Table, Tabled, settings::Style};
 use usagestat_core::{
-    AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
-    UsageSnapshot, paths,
+    AppConfig, LoadedProvider, MetricLine, ProgressFormat, ProviderSummary, UsageSnapshot, paths,
 };
-use usagestat_plugins::{discover_providers, test_https_request};
+use usagestat_plugins::{
+    ccusage::{self, CcusageQueryOpts},
+    discover_providers, test_https_request,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "usagestat")]
@@ -1101,44 +1103,30 @@ fn unsupported_cost_response() -> CostUnsupportedResponse {
 }
 
 fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
-    let targets: Vec<&str> = if provider_ids.is_empty() {
-        vec!["claude", "codex"]
-    } else {
-        provider_ids
-            .iter()
-            .map(|id| match normalize_provider_id(id) {
-                "openai" | "chatgpt" => "codex",
-                other => other,
-            })
-            .collect()
-    };
+    let targets = cost_provider_targets(provider_ids);
 
     let cutoff = chrono::Utc::now().date_naive() - chrono::Duration::days(days as i64);
+    let since = cutoff.format("%Y%m%d").to_string();
 
     let mut results: Vec<serde_json::Value> = Vec::new();
-    for &target in &targets {
-        let canonical = match target {
-            "claude" | "anthropic" => "claude",
-            "codex" | "openai" | "chatgpt" => "codex",
+    for target in &targets {
+        let provider = match ccusage::parse_provider(target) {
+            Some(provider) => provider,
             _ => {
                 results.push(serde_json::to_value(unsupported_cost_response())?);
                 continue;
             }
         };
+        let canonical = ccusage::provider_id(provider);
 
-        let output = std::process::Command::new("codexbar")
-            .args(["cost", "--provider", canonical, "--format", "json"])
-            .output();
-
-        let output = match output {
-            Err(_) => {
-                results.push(serde_json::to_value(unsupported_cost_response())?);
-                continue;
-            }
-            Ok(o) => o,
-        };
-
-        let raw: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+        let raw = match ccusage::query_daily(
+            &CcusageQueryOpts {
+                provider: Some(canonical.to_string()),
+                since: Some(since.clone()),
+                ..Default::default()
+            },
+            canonical,
+        ) {
             Ok(v) => v,
             Err(_) => {
                 results.push(serde_json::to_value(unsupported_cost_response())?);
@@ -1146,22 +1134,7 @@ fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
             }
         };
 
-        // codexbar outputs a JSON array; take the first element
-        let entry = match raw.as_array().and_then(|a| a.first()) {
-            Some(e) => e,
-            None => {
-                results.push(serde_json::to_value(unsupported_cost_response())?);
-                continue;
-            }
-        };
-
-        // If the entry itself has an error field, it failed
-        if entry.get("error").is_some() {
-            results.push(serde_json::to_value(unsupported_cost_response())?);
-            continue;
-        }
-
-        let daily_raw = entry.get("daily").and_then(|d| d.as_array());
+        let daily_raw = raw.get("daily").and_then(|d| d.as_array());
         let mut daily: Vec<DailyEntry> = daily_raw
             .map(|arr| {
                 arr.iter()
@@ -1173,41 +1146,37 @@ fn run_cost_historical(provider_ids: &[String], days: u32) -> Result<()> {
                                 return None;
                             }
                         }
-                        let input_tokens =
-                            d.get("inputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let output_tokens =
-                            d.get("outputTokens").and_then(|v| v.as_u64()).unwrap_or(0);
-                        let cache_read_tokens = d
-                            .get("cacheReadTokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let cache_creation_tokens = d
-                            .get("cacheCreationTokens")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(0);
-                        let total_tokens = d.get("totalTokens").and_then(|v| v.as_u64()).unwrap_or(
+                        let input_tokens = json_u64(d, &["inputTokens", "input_tokens"]);
+                        let output_tokens = json_u64(d, &["outputTokens", "output_tokens"]);
+                        let cache_read_tokens =
+                            json_u64(d, &["cacheReadTokens", "cache_read_tokens"]);
+                        let cache_creation_tokens =
+                            json_u64(d, &["cacheCreationTokens", "cache_creation_tokens"]);
+                        let total_tokens = json_u64(d, &["totalTokens", "total_tokens"]).max(
                             input_tokens
                                 + output_tokens
                                 + cache_read_tokens
                                 + cache_creation_tokens,
                         );
-                        let total_cost = d.get("totalCost").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        let total_cost = json_f64(d, &["totalCost", "total_cost", "costUSD"]);
                         let model_breakdowns = d
                             .get("modelBreakdowns")
+                            .or_else(|| d.get("model_breakdowns"))
                             .and_then(|v| v.as_array())
                             .map(|arr| {
                                 arr.iter()
                                     .filter_map(|m| {
                                         Some(ModelBreakdown {
-                                            model_name: m.get("modelName")?.as_str()?.to_string(),
-                                            cost: m
-                                                .get("cost")
-                                                .and_then(|v| v.as_f64())
-                                                .unwrap_or(0.0),
-                                            total_tokens: m
-                                                .get("totalTokens")
-                                                .and_then(|v| v.as_u64())
-                                                .unwrap_or(0),
+                                            model_name: m
+                                                .get("modelName")
+                                                .or_else(|| m.get("model_name"))?
+                                                .as_str()?
+                                                .to_string(),
+                                            cost: json_f64(m, &["cost", "costUSD"]),
+                                            total_tokens: json_u64(
+                                                m,
+                                                &["totalTokens", "total_tokens"],
+                                            ),
                                         })
                                     })
                                     .collect()
@@ -1265,6 +1234,7 @@ struct CostRecord {
     cost: Option<f64>,
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    total_tokens: Option<u64>,
     fetched_at: String,
 }
 
@@ -1274,14 +1244,15 @@ struct CostRow {
     cost: String,
     input_tokens: String,
     output_tokens: String,
+    total_tokens: String,
     fetched_at: String,
 }
 
 fn run_cost(
-    providers: &[LoadedProvider],
-    config: &AppConfig,
+    _providers: &[LoadedProvider],
+    _config: &AppConfig,
     provider_ids: &[String],
-    include_disabled: bool,
+    _include_disabled: bool,
     format: CostFormat,
     from_file: Option<PathBuf>,
     json: bool,
@@ -1290,20 +1261,7 @@ fn run_cost(
     let records = if let Some(path) = from_file {
         cost_records_from_history(&path, provider_ids)?
     } else {
-        let selected = select_providers(providers.to_vec(), config, provider_ids, include_disabled);
-        if selected.is_empty() {
-            eprintln!("usagestat: no providers for cost");
-            return Ok(());
-        }
-        let interrupt = batch_probe::register_interrupt_flag()?;
-        selected
-            .iter()
-            .map(|provider| {
-                let source = config.source_mode(&provider.manifest.id).to_string();
-                let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
-                cost_record_from_snapshot(&snap)
-            })
-            .collect()
+        cost_records_from_ccusage(provider_ids)?
     };
 
     match if json { CostFormat::Json } else { format } {
@@ -1311,12 +1269,13 @@ fn run_cost(
             if plain {
                 for r in &records {
                     println!(
-                        "{}\t{}\t{}\t{}\t{}\t{}",
+                        "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                         r.provider_id,
                         r.display_name,
                         r.cost.map(|c| format!("{c:.6}")).unwrap_or_default(),
                         r.input_tokens.map(|n| n.to_string()).unwrap_or_default(),
                         r.output_tokens.map(|n| n.to_string()).unwrap_or_default(),
+                        r.total_tokens.map(|n| n.to_string()).unwrap_or_default(),
                         r.fetched_at,
                     );
                 }
@@ -1328,6 +1287,162 @@ fn run_cost(
         CostFormat::Csv => print_cost_csv(&records)?,
     }
     Ok(())
+}
+
+fn cost_provider_targets(provider_ids: &[String]) -> Vec<String> {
+    if provider_ids.is_empty() {
+        return vec!["claude".to_string(), "codex".to_string()];
+    }
+    provider_ids
+        .iter()
+        .map(|id| match normalize_provider_id(id) {
+            "openai" | "chatgpt" => "codex",
+            other => other,
+        })
+        .map(str::to_string)
+        .collect()
+}
+
+fn cost_records_from_ccusage(provider_ids: &[String]) -> Result<Vec<CostRecord>> {
+    let targets = cost_provider_targets(provider_ids);
+    let since = (chrono::Utc::now().date_naive() - chrono::Duration::days(30))
+        .format("%Y%m%d")
+        .to_string();
+    let fetched_at = chrono::Utc::now().to_rfc3339();
+    let mut records = Vec::new();
+
+    for target in targets {
+        let provider = match ccusage::parse_provider(&target) {
+            Some(provider) => provider,
+            None => continue,
+        };
+        let provider_id = ccusage::provider_id(provider);
+        let data = match ccusage::query_daily(
+            &CcusageQueryOpts {
+                provider: Some(provider_id.to_string()),
+                since: Some(since.clone()),
+                ..Default::default()
+            },
+            provider_id,
+        ) {
+            Ok(data) => data,
+            Err(_) => {
+                records.push(CostRecord {
+                    provider_id: provider_id.to_string(),
+                    display_name: display_name_for_cost_provider(provider_id),
+                    source: "ccusage".to_string(),
+                    cost: None,
+                    input_tokens: None,
+                    output_tokens: None,
+                    total_tokens: None,
+                    fetched_at: fetched_at.clone(),
+                });
+                continue;
+            }
+        };
+        let summary = summarize_ccusage_daily(&data);
+        records.push(CostRecord {
+            provider_id: provider_id.to_string(),
+            display_name: display_name_for_cost_provider(provider_id),
+            source: "ccusage".to_string(),
+            cost: summary.cost,
+            input_tokens: summary.input_tokens,
+            output_tokens: summary.output_tokens,
+            total_tokens: summary.total_tokens,
+            fetched_at: fetched_at.clone(),
+        });
+    }
+
+    Ok(records)
+}
+
+struct CostSummary {
+    cost: Option<f64>,
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+    total_tokens: Option<u64>,
+}
+
+fn summarize_ccusage_daily(data: &serde_json::Value) -> CostSummary {
+    let Some(daily) = data.get("daily").and_then(|v| v.as_array()) else {
+        return CostSummary {
+            cost: None,
+            input_tokens: None,
+            output_tokens: None,
+            total_tokens: None,
+        };
+    };
+
+    let mut cost = 0.0;
+    let mut has_cost = false;
+    let mut input_tokens = 0_u64;
+    let mut output_tokens = 0_u64;
+    let mut total_tokens = 0_u64;
+    let mut has_input = false;
+    let mut has_output = false;
+    let mut has_total = false;
+
+    for day in daily {
+        let day_cost = json_f64(day, &["totalCost", "total_cost", "costUSD"]);
+        if day_cost > 0.0 {
+            has_cost = true;
+            cost += day_cost;
+        }
+        let input = json_u64(day, &["inputTokens", "input_tokens"]);
+        let output = json_u64(day, &["outputTokens", "output_tokens"]);
+        let total =
+            json_u64(day, &["totalTokens", "total_tokens"]).max(input.saturating_add(output));
+        if input > 0 {
+            has_input = true;
+            input_tokens += input;
+        }
+        if output > 0 {
+            has_output = true;
+            output_tokens += output;
+        }
+        if total > 0 {
+            has_total = true;
+            total_tokens += total;
+        }
+    }
+
+    CostSummary {
+        cost: has_cost.then_some(cost),
+        input_tokens: has_input.then_some(input_tokens),
+        output_tokens: has_output.then_some(output_tokens),
+        total_tokens: has_total.then_some(total_tokens),
+    }
+}
+
+fn json_u64(value: &serde_json::Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_f64().filter(|n| *n >= 0.0).map(|n| n as u64))
+                .or_else(|| value.as_str().and_then(|s| s.parse::<u64>().ok()))
+        })
+        .unwrap_or(0)
+}
+
+fn json_f64(value: &serde_json::Value, keys: &[&str]) -> f64 {
+    keys.iter()
+        .find_map(|key| value.get(*key))
+        .and_then(|value| {
+            value
+                .as_f64()
+                .or_else(|| value.as_str().and_then(|s| s.parse::<f64>().ok()))
+        })
+        .unwrap_or(0.0)
+}
+
+fn display_name_for_cost_provider(provider_id: &str) -> String {
+    match provider_id {
+        "claude" => "Claude".to_string(),
+        "codex" => "Codex".to_string(),
+        _ => provider_id.to_string(),
+    }
 }
 
 fn cost_records_from_history(
@@ -1349,25 +1464,13 @@ fn cost_records_from_history(
             cost: r.cost,
             input_tokens: r.input_tokens,
             output_tokens: r.output_tokens,
+            total_tokens: r
+                .input_tokens
+                .zip(r.output_tokens)
+                .map(|(input, output)| input + output),
             fetched_at: r.ts,
         })
         .collect())
-}
-
-fn cost_record_from_snapshot(snapshot: &UsageSnapshot) -> CostRecord {
-    let metrics = NormalizedMetrics::from_snapshot(snapshot);
-    CostRecord {
-        provider_id: snapshot.provider_id.clone(),
-        display_name: snapshot.display_name.clone(),
-        source: snapshot
-            .source
-            .clone()
-            .unwrap_or_else(|| "live".to_string()),
-        cost: metrics.cost,
-        input_tokens: metrics.input_tokens,
-        output_tokens: metrics.output_tokens,
-        fetched_at: snapshot.fetched_at.to_rfc3339(),
-    }
 }
 
 fn print_cost_csv(records: &[CostRecord]) -> Result<()> {
@@ -1375,18 +1478,19 @@ fn print_cost_csv(records: &[CostRecord]) -> Result<()> {
     let mut w = std::io::stdout().lock();
     writeln!(
         w,
-        "provider_id,display_name,source,cost,input_tokens,output_tokens,fetched_at"
+        "provider_id,display_name,source,cost,input_tokens,output_tokens,total_tokens,fetched_at"
     )?;
     for r in records {
         writeln!(
             w,
-            "{},{},{},{},{},{},{}",
+            "{},{},{},{},{},{},{},{}",
             csv_cell(&r.provider_id),
             csv_cell(&r.display_name),
             csv_cell(&r.source),
             r.cost.map(|c| format!("{c:.6}")).unwrap_or_default(),
             r.input_tokens.map(|n| n.to_string()).unwrap_or_default(),
             r.output_tokens.map(|n| n.to_string()).unwrap_or_default(),
+            r.total_tokens.map(|n| n.to_string()).unwrap_or_default(),
             csv_cell(&r.fetched_at),
         )?;
     }
@@ -1416,6 +1520,10 @@ fn print_cost_table(records: &[CostRecord]) {
                 .unwrap_or_else(|| "-".to_string()),
             output_tokens: r
                 .output_tokens
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "-".to_string()),
+            total_tokens: r
+                .total_tokens
                 .map(|n| n.to_string())
                 .unwrap_or_else(|| "-".to_string()),
             fetched_at: r.fetched_at.clone(),

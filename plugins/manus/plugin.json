@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "manus",
+  "name": "Manus",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#111827",
+  "links": [
+    { "label": "Dashboard", "url": "https://manus.im" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://manus.im",
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

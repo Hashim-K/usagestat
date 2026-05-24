@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "stepfun",
+  "name": "StepFun",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#2563EB",
+  "links": [
+    { "label": "Platform", "url": "https://platform.stepfun.com" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://platform.stepfun.com",
+  "lines": [
+    { "type": "progress", "label": "Step Plan", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

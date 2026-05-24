@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "llm-proxy",
+  "name": "LLM Proxy",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#0F766E",
+  "links": [
+    { "label": "Quota Stats", "url": "https://llm-proxy.local" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "progress", "label": "Quota", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Providers", "scope": "detail" }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "aws-bedrock",
+  "name": "AWS Bedrock",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF9900",
+  "links": [
+    { "label": "Cost Explorer", "url": "https://console.aws.amazon.com/costmanagement/home" },
+    { "label": "Health", "url": "https://health.aws.amazon.com/health/status" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "text", "label": "Spend", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

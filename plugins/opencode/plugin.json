@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "opencode",
+  "name": "OpenCode",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#9CA3AF",
+  "links": [
+    { "label": "Dashboard", "url": "https://opencode.ai" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://opencode.ai",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

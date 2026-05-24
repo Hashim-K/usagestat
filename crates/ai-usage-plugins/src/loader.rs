@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
+use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use usagestat_core::{LoadedProvider, ProviderManifest};
 
 pub fn discover_providers(plugin_dirs: &[PathBuf]) -> Vec<LoadedProvider> {
     let mut providers = Vec::new();
+    let mut seen_ids = HashSet::new();
 
     for plugin_dir in plugin_dirs {
         let Ok(entries) = fs::read_dir(plugin_dir) else {
@@ -17,7 +19,11 @@ pub fn discover_providers(plugin_dirs: &[PathBuf]) -> Vec<LoadedProvider> {
                 continue;
             }
             match load_provider(&path) {
-                Ok(provider) => providers.push(provider),
+                Ok(provider) => {
+                    if seen_ids.insert(provider.manifest.id.clone()) {
+                        providers.push(provider);
+                    }
+                }
                 Err(error) => {
                     log::warn!("failed to load provider plugin {}: {error}", path.display())
                 }

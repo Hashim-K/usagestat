@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "mimo",
+  "name": "Xiaomi MiMo",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF6900",
+  "links": [
+    { "label": "Platform", "url": "https://platform.xiaomimimo.com" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://platform.xiaomimimo.com",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

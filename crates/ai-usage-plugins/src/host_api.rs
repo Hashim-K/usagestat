@@ -1,3 +1,4 @@
+use crate::ccusage::{CcusageQueryOpts, query_status_json};
 use rquickjs::{Ctx, Exception, Function, Object};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -9,8 +10,17 @@ use std::process::Command;
 const ENV_ALLOWLIST: &[&str] = &[
     "USAGESTAT_PLUGIN_DIR",
     "AI_USAGE_PLUGIN_DIR",
+    "ABACUS_COOKIE",
+    "ALIBABA_CODING_PLAN_API_KEY",
+    "ALIBABA_CODING_PLAN_COOKIE",
+    "ALIBABA_COOKIE",
     "ARK_API_KEY",
     "AUGMENT_ACCESS_TOKEN",
+    "AWS_ACCESS_KEY_ID",
+    "AWS_DEFAULT_REGION",
+    "AWS_REGION",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
     "CODEBUFF_API_KEY",
     "CODEX_HOME",
     "CODEX_REFRESH_URL",
@@ -19,31 +29,59 @@ const ENV_ALLOWLIST: &[&str] = &[
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
     "CLAUDE_WEB_SESSION_KEY",
+    "CLOUDSDK_CONFIG",
+    "COMMAND_CODE_COOKIE",
+    "COMMANDCODE_COOKIE",
     "CROF_API_KEY",
     "CURSOR_HOME",
+    "DEEPGRAM_API_KEY",
+    "DEEPGRAM_PROJECT_ID",
     "DEEPSEEK_API_KEY",
     "DEEPSEEK_KEY",
     "DOUBAO_API_KEY",
+    "DROID_COOKIE",
+    "ELEVENLABS_API_KEY",
+    "ELEVENLABS_API_URL",
+    "FACTORY_COOKIE",
     "GEMINI_API_KEY",
     "GH_TOKEN",
     "GITHUB_TOKEN",
     "GLM_API_KEY",
+    "GOOGLE_APPLICATION_CREDENTIALS",
     "COPILOT_API_TOKEN",
     "COPILOT_USAGE_URL",
+    "GROK_COOKIE",
+    "GROQ_API_KEY",
+    "GROQCLOUD_API_KEY",
     "KILO_API_KEY",
     "KIMI_API_KEY",
+    "LLMPROXY_API_KEY",
+    "LLM_PROXY_API_KEY",
+    "LLM_PROXY_API_URL",
+    "LLM_PROXY_BASE_URL",
+    "MANUS_COOKIE",
+    "MANUS_SESSION_TOKEN",
+    "MIMO_COOKIE",
     "MISTRAL_COOKIE",
     "MOONSHOT_API_KEY",
+    "MOONSHOT_API_URL",
+    "MOONSHOT_KEY",
+    "MOONSHOT_REGION",
     "NANOGPT_API_KEY",
     "OLLAMA_COOKIE",
     "OPENAI_API_KEY",
     "OPENAI_PLATFORM_API_KEY",
+    "OPENCODE_COOKIE",
     "OPENROUTER_API_KEY",
     "OPENROUTER_API_BASE",
     "SRC_ACCESS_TOKEN",
+    "STEPFUN_COOKIE",
+    "STEPFUN_OASIS_TOKEN",
     "VENICE_API_KEY",
     "VOLCENGINE_API_KEY",
     "WARP_API_KEY",
+    "XI_API_KEY",
+    "XIAOMI_MIMO_COOKIE",
     "ZAI_API_KEY",
     "ZAI_API_TOKEN",
 ];
@@ -108,8 +146,10 @@ pub fn inject<'js>(
     inject_http(ctx, &host)?;
     inject_command(ctx, &host)?;
     inject_sqlite(ctx, &host)?;
+    inject_ccusage(ctx, &host, plugin_id)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
+    patch_ccusage_wrapper(ctx)?;
     inject_utils(ctx)?;
     Ok(())
 }
@@ -474,6 +514,52 @@ fn inject_sqlite<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()
 
     host.set("sqlite", sqlite_obj)?;
     Ok(())
+}
+
+fn inject_ccusage<'js>(
+    ctx: &Ctx<'js>,
+    host: &Object<'js>,
+    plugin_id: &str,
+) -> rquickjs::Result<()> {
+    let ccusage_obj = Object::new(ctx.clone())?;
+    let pid = plugin_id.to_string();
+
+    ccusage_obj.set(
+        "_queryRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                let opts: CcusageQueryOpts = serde_json::from_str(&opts_json).unwrap_or_default();
+                Ok(query_status_json(&opts, &pid))
+            },
+        )?,
+    )?;
+
+    host.set("ccusage", ccusage_obj)?;
+    Ok(())
+}
+
+fn patch_ccusage_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            if (__usagestat_ctx.host.ccusage && __usagestat_ctx.host.ccusage._queryRaw) {
+                var rawFn = __usagestat_ctx.host.ccusage._queryRaw;
+                __usagestat_ctx.host.ccusage.query = function(opts) {
+                    var result = rawFn(JSON.stringify(opts || {}));
+                    try {
+                        var parsed = JSON.parse(result);
+                        if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                            return parsed;
+                        }
+                    } catch (e) {}
+                    return { status: "runner_failed" };
+                };
+            }
+        })();
+        "#
+        .as_bytes(),
+    )
 }
 
 fn sqlite_query_impl(path: &str, sql: &str) -> Result<String, String> {

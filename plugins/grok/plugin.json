@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "grok",
+  "name": "Grok",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#111111",
+  "links": [
+    { "label": "Grok", "url": "https://grok.com" },
+    { "label": "Status", "url": "https://status.x.ai" }
+  ],
+  "supportedModes": ["cli", "web", "local"],
+  "autoMode": "cli",
+  "webUrl": "https://grok.com",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

@@ -2,16 +2,28 @@ use std::path::PathBuf;
 
 use crate::AppConfig;
 
+fn app_dir_name() -> &'static str {
+    if std::env::current_exe()
+        .ok()
+        .and_then(|path| path.file_name().map(|name| name.to_owned()))
+        .is_some_and(|name| name == "usagestat-dev")
+    {
+        "usagestat-dev"
+    } else {
+        "usagestat"
+    }
+}
+
 pub fn config_dir() -> PathBuf {
     dirs::config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("usagestat")
+        .join(app_dir_name())
 }
 
 pub fn data_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("usagestat")
+        .join(app_dir_name())
 }
 
 pub fn config_file() -> PathBuf {
@@ -32,9 +44,13 @@ pub fn default_plugin_dirs() -> Vec<PathBuf> {
     }
 
     dirs.push(config_dir().join("plugins"));
+    if app_dir_name() == "usagestat-dev" {
+        dirs.push(data_dir().join("plugins"));
+    }
     if let Some(prefix) = install_prefix() {
-        dirs.push(prefix.join("share/usagestat/plugins"));
-        dirs.push(prefix.join("lib/usagestat/plugins"));
+        let app_dir = app_dir_name();
+        dirs.push(prefix.join(format!("share/{app_dir}/plugins")));
+        dirs.push(prefix.join(format!("lib/{app_dir}/plugins")));
     }
     dirs.push(PathBuf::from("plugins"));
     dirs

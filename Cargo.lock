@@ -1782,7 +1782,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-cli"
-version = "1.0.2"
+version = "1.0.3-beta.0"
 dependencies = [
  "aes",
  "anyhow",
@@ -1806,7 +1806,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-core"
-version = "1.0.2"
+version = "1.0.3-beta.0"
 dependencies = [
  "chrono",
  "dirs",
@@ -1818,7 +1818,7 @@ dependencies = [
 
 [[package]]
 name = "usagestat-daemon"
-version = "1.0.2"
+version = "1.0.3-beta.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -1831,10 +1831,11 @@ dependencies = [
 
 [[package]]
 name = "usagestat-plugins"
-version = "1.0.2"
+version = "1.0.3-beta.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "dirs",
  "log",
  "reqwest",
  "rquickjs",

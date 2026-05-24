@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "alibaba",
+  "name": "Alibaba",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF6A00",
+  "links": [
+    { "label": "Console", "url": "https://bailian.console.aliyun.com" },
+    { "label": "Status", "url": "https://status.aliyun.com" }
+  ],
+  "supportedModes": ["web", "api"],
+  "autoMode": "web",
+  "webUrl": "https://bailian.console.aliyun.com",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

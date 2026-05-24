@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "elevenlabs",
+  "name": "ElevenLabs",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#111111",
+  "links": [
+    { "label": "Usage", "url": "https://elevenlabs.io/app/subscription" },
+    { "label": "Status", "url": "https://status.elevenlabs.io" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "progress", "label": "Characters", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Voice slots", "scope": "detail" }
+  ]
+}

@@ -235,8 +235,9 @@ usagestat status claude codex --json
 
 ### `cost`
 
-Prints normalized cost/token data from live snapshots, or from saved history
-when `--from-file` is supplied.
+Prints Claude/Codex local cost and token summaries using the same ccusage
+runners as CodexBar/CrossUsage, or reads saved history when `--from-file` is
+supplied.
 
 ```bash
 usagestat cost [PROVIDER_IDS]...
@@ -247,13 +248,13 @@ Options:
 ```text
 --format text|json|csv   Output format. Defaults to text.
 --from-file <PATH>       Read JSONL history instead of probing live.
---refresh                Accepted for compatibility; live snapshot cost has no cache to bypass.
+--refresh                Accepted for compatibility.
 ```
 
-This is not yet equivalent to CodexBar's native local cost scanner. It only
-reports fields the backend can normalize from provider snapshots/history. Native
-Rust cost scanners for Claude/Codex logs should replace this with true local
-cost parity.
+Live cost currently supports `claude` and `codex`; `--provider all` maps to
+those local cost-capable providers. The first run may download the pinned
+ccusage packages through an available runner (`bunx`, `pnpm dlx`, `yarn dlx`,
+`npm exec`, or `npx`).
 
 ```bash
 usagestat cost claude codex

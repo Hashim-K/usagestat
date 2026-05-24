@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "vertex-ai",
+  "name": "Vertex AI",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#4285F4",
+  "links": [
+    { "label": "Quotas", "url": "https://console.cloud.google.com/iam-admin/quotas" },
+    { "label": "Status", "url": "https://status.cloud.google.com" }
+  ],
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "oauth",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

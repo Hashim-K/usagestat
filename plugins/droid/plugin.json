@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "droid",
+  "name": "Droid",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#8B5CF6",
+  "links": [
+    { "label": "Factory", "url": "https://app.factory.ai" },
+    { "label": "Status", "url": "https://status.factory.ai" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://app.factory.ai",
+  "lines": [
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

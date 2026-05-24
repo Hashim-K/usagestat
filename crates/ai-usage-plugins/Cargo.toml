@@ -12,6 +12,7 @@ path = "src/lib.rs"
 usagestat-core = { path = "../ai-usage-core" }
 anyhow.workspace = true
 chrono.workspace = true
+dirs.workspace = true
 log.workspace = true
 reqwest.workspace = true
 rquickjs.workspace = true

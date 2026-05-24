@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "deepgram",
+  "name": "Deepgram",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#13EF93",
+  "links": [
+    { "label": "Console", "url": "https://console.deepgram.com" },
+    { "label": "Status", "url": "https://status.deepgram.com" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "text", "label": "Projects", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

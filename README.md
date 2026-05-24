@@ -36,13 +36,13 @@ Plugins are discovered from:
 
 Bundled providers:
 
-- `mock`: development fixture.
-- `host-smoke`: disabled fixture for host API checks.
-- `claude`: Claude Code OAuth usage.
-- `codex`: Codex/Openagent usage from Codex CLI OAuth auth.
-- `copilot`: GitHub Copilot usage via `COPILOT_API_TOKEN`, `GITHUB_TOKEN`, or `GH_TOKEN`.
-- `gemini`: Gemini CLI OAuth quota.
-- `openrouter`: OpenRouter API credits via `OPENROUTER_API_KEY`.
+- `abacus-ai`, `alibaba`, `amp`, `antigravity`, `augment`, `aws-bedrock`
+- `claude`, `codebuff`, `codex`, `command-code`, `copilot`, `crof`, `cursor`
+- `deepgram`, `deepseek`, `doubao`, `droid`, `elevenlabs`, `factory`, `gemini`
+- `grok`, `groqcloud`, `jetbrains-ai-assistant`, `kilo`, `kimi`, `kimi-k2`, `kiro`
+- `llm-proxy`, `manus`, `mimo`, `minimax`, `mistral`, `moonshot`, `nanogpt`
+- `ollama`, `openai-api`, `opencode`, `opencode-go`, `openrouter`, `perplexity`
+- `stepfun`, `synthetic`, `venice`, `vertex-ai`, `warp`, `windsurf`, `zai`
 
 ## Config
 

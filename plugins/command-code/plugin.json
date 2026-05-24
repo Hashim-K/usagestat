@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "command-code",
+  "name": "Command Code",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#14B8A6",
+  "links": [
+    { "label": "Dashboard", "url": "https://commandcode.ai" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://commandcode.ai",
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

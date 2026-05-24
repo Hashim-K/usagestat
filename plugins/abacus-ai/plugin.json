@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "abacus-ai",
+  "name": "Abacus AI",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#64748B",
+  "links": [
+    { "label": "Dashboard", "url": "https://apps.abacus.ai" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://apps.abacus.ai",
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

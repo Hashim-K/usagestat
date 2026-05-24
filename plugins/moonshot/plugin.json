@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "moonshot",
+  "name": "Moonshot",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#111827",
+  "links": [
+    { "label": "Console", "url": "https://platform.moonshot.ai" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "text", "label": "Balance", "scope": "overview", "primaryOrder": 1 }
+  ]
+}
