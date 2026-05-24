@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- Add provider plugin entries for Abacus AI, Alibaba, AWS Bedrock, Command Code, Deepgram, Droid, ElevenLabs, Grok, GroqCloud, LLM Proxy, Manus, Moonshot, OpenCode, StepFun, Vertex AI, and Xiaomi MiMo.
+- Add provider plugin entries for Abacus AI, Alibaba, Alibaba Token Plan, AWS Bedrock, Azure OpenAI, Command Code, Deepgram, Droid, ElevenLabs, Grok, GroqCloud, LLM Proxy, Manus, Moonshot, OpenCode, StepFun, T3 Chat, Vertex AI, and Xiaomi MiMo.
+- Back `usagestat cost` and Codex/Claude cost rows with pinned ccusage runners, including total-token columns and 30-day cost summaries.
+- Add a local beta workflow: `scripts/install-dev.sh` installs `usagestat-dev` and synced dev plugins under `~/.local`.
+- Harden ccusage runner discovery and cleanup by resolving NVM default aliases and killing Unix child process groups on timeout.
 
 ## 1.0.2 - 2026-05-18
 

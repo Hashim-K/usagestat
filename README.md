@@ -36,13 +36,14 @@ Plugins are discovered from:
 
 Bundled providers:
 
-- `abacus-ai`, `alibaba`, `amp`, `antigravity`, `augment`, `aws-bedrock`
-- `claude`, `codebuff`, `codex`, `command-code`, `copilot`, `crof`, `cursor`
-- `deepgram`, `deepseek`, `doubao`, `droid`, `elevenlabs`, `factory`, `gemini`
-- `grok`, `groqcloud`, `jetbrains-ai-assistant`, `kilo`, `kimi`, `kimi-k2`, `kiro`
-- `llm-proxy`, `manus`, `mimo`, `minimax`, `mistral`, `moonshot`, `nanogpt`
-- `ollama`, `openai-api`, `opencode`, `opencode-go`, `openrouter`, `perplexity`
-- `stepfun`, `synthetic`, `venice`, `vertex-ai`, `warp`, `windsurf`, `zai`
+- `abacus-ai`, `alibaba`, `alibaba-token-plan`, `amp`, `antigravity`, `augment`
+- `aws-bedrock`, `azure-openai`, `claude`, `codebuff`, `codex`, `command-code`
+- `copilot`, `crof`, `cursor`, `deepgram`, `deepseek`, `doubao`, `droid`
+- `elevenlabs`, `factory`, `gemini`, `grok`, `groqcloud`, `jetbrains-ai-assistant`
+- `kilo`, `kimi`, `kimi-k2`, `kiro`, `llm-proxy`, `manus`, `mimo`, `minimax`
+- `mistral`, `moonshot`, `nanogpt`, `ollama`, `openai-api`, `opencode`
+- `opencode-go`, `openrouter`, `perplexity`, `stepfun`, `synthetic`, `t3chat`
+- `venice`, `vertex-ai`, `warp`, `windsurf`, `zai`
 
 ## Config
 

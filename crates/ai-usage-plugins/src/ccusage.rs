@@ -184,6 +184,7 @@ fn path_entries_with(home: Option<&Path>, existing_path: Option<&OsStr>) -> Vec<
     if let Some(home) = home {
         entries.push(home.join(".bun/bin"));
         entries.push(home.join(".nvm/current/bin"));
+        entries.extend(nvm_node_bin_paths(home));
         entries.push(home.join(".local/bin"));
     }
     entries.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
@@ -198,6 +199,36 @@ fn path_entries_with(home: Option<&Path>, existing_path: Option<&OsStr>) -> Vec<
         }
     }
     unique
+}
+
+fn nvm_node_bin_paths(home: &Path) -> Vec<PathBuf> {
+    let nvm_dir = home.join(".nvm");
+    let Some(version) = resolve_nvm_alias(&nvm_dir, "default", 0) else {
+        return Vec::new();
+    };
+    vec![nvm_dir.join("versions/node").join(version).join("bin")]
+}
+
+fn resolve_nvm_alias(nvm_dir: &Path, alias: &str, depth: usize) -> Option<String> {
+    if depth > 4 {
+        return None;
+    }
+    let raw = std::fs::read_to_string(nvm_dir.join("alias").join(alias)).ok()?;
+    let value = raw
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .split('#')
+        .next()
+        .unwrap_or_default()
+        .trim();
+    if value.is_empty() {
+        return None;
+    }
+    if value.starts_with('v') {
+        return Some(value.to_string());
+    }
+    resolve_nvm_alias(nvm_dir, value, depth + 1)
 }
 
 fn enriched_path() -> Option<OsString> {
@@ -346,14 +377,28 @@ fn run_with_runner(
                 return CcusageRunnerResult::Failed;
             }
             Ok(None) if start.elapsed() > Duration::from_secs(CCUSAGE_TIMEOUT_SECS) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_child(&mut child);
                 return CcusageRunnerResult::TimedOut;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(CCUSAGE_POLL_INTERVAL_MS)),
             Err(_) => return CcusageRunnerResult::Failed,
         }
     }
+}
+
+fn terminate_child(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    {
+        let pgid = format!("-{}", child.id());
+        let _ = Command::new("kill")
+            .arg("-KILL")
+            .arg(pgid)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn expand_home(path: &str) -> String {

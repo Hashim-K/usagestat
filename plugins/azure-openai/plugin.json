@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "azure-openai",
+  "name": "Azure OpenAI",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#0078D4",
+  "links": [
+    { "label": "AI Foundry", "url": "https://ai.azure.com" },
+    { "label": "Azure Status", "url": "https://azure.status.microsoft/en-us/status" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "badge", "label": "Deployment", "scope": "overview", "primaryOrder": 1 }
+  ]
+}

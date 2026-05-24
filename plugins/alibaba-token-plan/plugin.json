@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "alibaba-token-plan",
+  "name": "Alibaba Token Plan",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#FF6A00",
+  "links": [
+    { "label": "Token Plan", "url": "https://bailian.console.aliyun.com" },
+    { "label": "Status", "url": "https://status.aliyun.com" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://bailian.console.aliyun.com",
+  "lines": [
+    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Usage", "scope": "detail" }
+  ]
+}

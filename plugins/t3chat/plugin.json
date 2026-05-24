@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "t3chat",
+  "name": "T3 Chat",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "brandColor": "#F56647",
+  "links": [
+    { "label": "Customization", "url": "https://t3.chat/settings/customization" },
+    { "label": "Subscription", "url": "https://t3.chat/settings/subscription" }
+  ],
+  "supportedModes": ["web"],
+  "autoMode": "web",
+  "webUrl": "https://t3.chat",
+  "lines": [
+    { "type": "progress", "label": "Base", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Overage", "scope": "detail" }
+  ]
+}
