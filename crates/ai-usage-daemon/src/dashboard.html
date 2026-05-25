@@ -343,6 +343,11 @@ header{
 }
 .history-tab.active{color:var(--hi);border-color:var(--blue);background:color-mix(in srgb,var(--blue) 14%,transparent)}
 .history-chart{min-height:230px}
+.cost-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.cost-head .box-title{margin-bottom:0;flex:1;min-width:180px}
+.cost-range{display:flex;gap:6px;flex-wrap:wrap}
+.cost-tab{border:1px solid var(--bd2);background:var(--s1);color:var(--mu);border-radius:6px;padding:5px 9px;font:11px var(--mono);cursor:pointer}
+.cost-tab.active{color:var(--hi);border-color:var(--blue);background:color-mix(in srgb,var(--blue) 14%,transparent)}
 .series-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--bd)}
 .series-row:last-child{border-bottom:none}
 .series-left{display:flex;align-items:center;gap:8px;min-width:0}
@@ -992,7 +997,7 @@ function renderHistorySection(id, raw, snap){
 function renderCostSection(id, raw, history){
   const box = document.getElementById(`cost-box-${id}`);
   if(!box) return;
-  box.innerHTML = `<div class="box-title">Cost History</div>`;
+  box.innerHTML = costHeaderHtml(id);
 
   // resolve codexbar's array shape or our spec shape
   let entry = null;
@@ -1011,7 +1016,7 @@ function renderCostSection(id, raw, history){
       html+=`<div class="cstat"><div class="cstat-val">${daily.length}</div><div class="cstat-lbl">sampled days</div></div>`;
       html+=`</div><div class="chart-wrap" id="chart-${id}"></div>`;
       box.insertAdjacentHTML('beforeend', html);
-      buildChart(`chart-${id}`, daily);
+      setupCostRange(box, id, daily);
       return;
     }
     const msg = box.querySelector('.cost-unavail') || document.createElement('div');
@@ -1021,14 +1026,15 @@ function renderCostSection(id, raw, history){
     return;
   }
 
-  const daily = (entry.daily||[]).sort((a,b)=>a.date.localeCompare(b.date));
-  const totals = entry.totals || {};
-  const totalCost = entry.last30DaysCostUSD ?? totals.totalCost ?? totals.costUsd ?? totals.costUSD ?? 0;
-  const totalTok  = entry.last30DaysTokens  ?? totals.totalTokens ?? 0;
-  const activeDays = daily.filter(d=>rowCost(d)>0 || rowTotalTokens(d)>0).length;
+  const daily = (entry.daily||[]).map(normalizeCostRow).filter(d=>d.date).sort((a,b)=>a.date.localeCompare(b.date));
+  const viewDaily = calendarWindow(daily, 30);
+  const totals = usageTotals(viewDaily);
+  const totalCost = totals.cost;
+  const totalTok = totals.totalTokens;
+  const activeDays = viewDaily.filter(d=>rowCost(d)>0 || rowTotalTokens(d)>0).length;
   const avgDay = activeDays > 0 ? totalCost / activeDays : 0;
 
-  let html = `<div class="cost-stats">`;
+  let html = `<div class="cost-stats" id="cost-stats-${id}">`;
   html+=`<div class="cstat"><div class="cstat-val">$${totalCost.toFixed(2)}</div><div class="cstat-lbl">tracked total</div></div>`;
   html+=`<div class="cstat"><div class="cstat-val">$${avgDay.toFixed(2)}</div><div class="cstat-lbl">per active day</div></div>`;
   html+=`<div class="cstat"><div class="cstat-val">${activeDays}</div><div class="cstat-lbl">active days</div></div>`;
@@ -1039,9 +1045,9 @@ function renderCostSection(id, raw, history){
   html+=`<div class="chart-wrap" id="chart-${id}"></div>`;
 
   // model table
-  const models = aggregateModels(daily);
+  const models = aggregateModels(viewDaily);
   if(models.length){
-    html+=`<table class="model-table">`;
+    html+=`<table class="model-table" id="model-table-${id}">`;
     html+=`<thead><tr><th>Model</th><th style="text-align:right">Cost</th><th style="text-align:right">Share</th><th style="text-align:right">Tokens</th></tr></thead><tbody>`;
     for(const [name,{cost,tokens}] of models){
       const p = totalCost>0?cost/totalCost*100:0;
@@ -1056,7 +1062,72 @@ function renderCostSection(id, raw, history){
   }
 
   box.insertAdjacentHTML('beforeend', html);
-  buildChart(`chart-${id}`, daily);
+  setupCostRange(box, id, daily);
+}
+
+function costHeaderHtml(id){
+  return `<div class="cost-head"><div class="box-title">Cost History · Last 30 Days</div><div class="cost-range" id="cost-range-${id}">
+    <button class="cost-tab active" type="button" data-range="30">30D</button>
+    <button class="cost-tab" type="button" data-range="90">90D</button>
+    <button class="cost-tab" type="button" data-range="365">Year</button>
+    <button class="cost-tab" type="button" data-range="all">All</button>
+  </div></div>`;
+}
+
+function setupCostRange(box, id, daily){
+  const state = { daily: daily.map(normalizeCostRow).filter(d=>d.date).sort((a,b)=>a.date.localeCompare(b.date)), range:'30' };
+  box._costState = state;
+  box.querySelectorAll('.cost-tab').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      state.range = btn.dataset.range;
+      box.querySelectorAll('.cost-tab').forEach(b=>b.classList.toggle('active', b===btn));
+      updateCostView(id, state);
+    });
+  });
+  updateCostView(id, state);
+}
+
+function updateCostView(id, state){
+  const rows = state.range === 'all' ? fullCalendarRange(state.daily) : calendarWindow(state.daily, Number(state.range));
+  const title = document.querySelector(`#cost-box-${CSS.escape(id)} .cost-head .box-title`);
+  if(title) title.textContent = `Cost History · ${rangeLabel(state.range)}`;
+  const stats = document.getElementById(`cost-stats-${id}`);
+  if(stats){
+    const totals = usageTotals(rows);
+    const activeDays = rows.filter(d=>rowCost(d)>0 || rowTotalTokens(d)>0).length;
+    const avgDay = activeDays > 0 ? totals.cost / activeDays : 0;
+    stats.innerHTML = `<div class="cstat"><div class="cstat-val">$${totals.cost.toFixed(2)}</div><div class="cstat-lbl">${state.range==='30'?'30-day':'range'} total</div></div>
+      <div class="cstat"><div class="cstat-val">$${avgDay.toFixed(2)}</div><div class="cstat-lbl">per active day</div></div>
+      <div class="cstat"><div class="cstat-val">${activeDays}/${rows.length}</div><div class="cstat-lbl">active days</div></div>
+      <div class="cstat"><div class="cstat-val">${fmtTok(totals.totalTokens)}</div><div class="cstat-lbl">total tokens</div></div>`;
+  }
+  buildChart(`chart-${id}`, rows);
+  updateModelTable(id, rows);
+}
+
+function rangeLabel(range){
+  if(range==='30') return 'Last 30 Days';
+  if(range==='90') return 'Last 90 Days';
+  if(range==='365') return 'Year';
+  return 'All Tracked Days';
+}
+
+function updateModelTable(id, rows){
+  const table = document.getElementById(`model-table-${id}`);
+  if(!table) return;
+  const models = aggregateModels(rows);
+  const totalCost = usageTotals(rows).cost;
+  let html = `<thead><tr><th>Model</th><th style="text-align:right">Cost</th><th style="text-align:right">Share</th><th style="text-align:right">Tokens</th></tr></thead><tbody>`;
+  for(const [name,{cost,tokens}] of models){
+    const p = totalCost>0?cost/totalCost*100:0;
+    html+=`<tr>
+      <td class="model-name">${esc(name)}</td>
+      <td class="model-cost">$${cost.toFixed(2)}</td>
+      <td><div class="share-cell"><div class="share-bar"><div style="width:${p.toFixed(1)}%"></div></div><span class="share-pct">${p.toFixed(1)}%</span></div></td>
+      <td class="model-toks">${fmtTok(tokens)}</td>
+    </tr>`;
+  }
+  table.innerHTML = html + `</tbody>`;
 }
 
 function normalizeHistory(raw){
@@ -1124,6 +1195,69 @@ function historyToDaily(records){
       Number(r.cacheReadTokens||0) + Number(r.cacheCreationTokens||0);
   }
   return Object.values(map).sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+function normalizeCostRow(row){
+  const date = rowDate(row);
+  return {
+    ...row,
+    date,
+    inputTokens: rowInput(row),
+    outputTokens: rowOutput(row),
+    cacheReadTokens: rowCacheRead(row),
+    cacheCreationTokens: rowCacheCreate(row),
+    reasoningOutputTokens: rowReasoning(row),
+    totalTokens: rowTotalTokens(row),
+    totalCost: rowCost(row),
+  };
+}
+
+function calendarWindow(rows, days){
+  const end = todayUtcDate();
+  const start = addDays(end, -(days - 1));
+  return calendarRange(rows, start, end);
+}
+
+function fullCalendarRange(rows){
+  if(!rows.length) return [];
+  const sorted = rows.slice().sort((a,b)=>a.date.localeCompare(b.date));
+  return calendarRange(rows, parseDateOnly(sorted[0].date), parseDateOnly(sorted[sorted.length-1].date));
+}
+
+function calendarRange(rows, start, end){
+  const byDate = new Map(rows.map(r=>[r.date, normalizeCostRow(r)]));
+  const out = [];
+  for(let d = new Date(start); d <= end; d = addDays(d, 1)){
+    const key = dateKey(d);
+    out.push(byDate.get(key) || emptyDay(key));
+  }
+  return out;
+}
+
+function emptyDay(date){
+  return { date, inputTokens:0, outputTokens:0, cacheReadTokens:0, cacheCreationTokens:0, reasoningOutputTokens:0, totalTokens:0, totalCost:0, models:{} };
+}
+
+function todayUtcDate(){
+  const n = new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(), n.getUTCMonth(), n.getUTCDate()));
+}
+function parseDateOnly(value){
+  const s = String(value);
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m) return new Date(Date.UTC(Number(m[1]), Number(m[2])-1, Number(m[3])));
+  const ms = Date.parse(s);
+  if(Number.isFinite(ms)){
+    const d = new Date(ms);
+    return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
+  }
+  return todayUtcDate();
+}
+function dateKey(date){ return date.toISOString().slice(0,10); }
+function addDays(date, days){
+  const d = new Date(date);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
 }
 
 function historyTab(id,mode,label,active){
@@ -1536,6 +1670,7 @@ function axisDate(ts,bucket){
 function buildChart(containerId, daily){
   const container = document.getElementById(containerId);
   if(!container) return;
+  daily = daily.map(normalizeCostRow);
   const active = daily.filter(d=>rowCost(d)>0);
   if(!active.length){ container.innerHTML=`<div class="chart-loading">No daily cost data recorded</div>`; return; }
 
@@ -1562,11 +1697,11 @@ function buildChart(containerId, daily){
     const bH=CH*(cost/maxCost)||0;
     const y=PT+CH-bH;
     const rel=cost/maxCost;
-    const col=rel<0.25?'#7289da':rel<0.5?'#43b581':rel<0.75?'#eaca8b':'#d25050';
+    const col=cost<=0?'#101320':rel<0.25?'#7289da':rel<0.5?'#43b581':rel<0.75?'#eaca8b':'#d25050';
 
     svg+=`<g class="bar-g" data-date="${d.date}" data-cost="${cost.toFixed(4)}"
             data-tokens="${rowTotalTokens(d)}" data-models="${esc(modelsLabel(d))}">`;
-    svg+=`<rect x="${x.toFixed(1)}" y="${bH>0?y.toFixed(1):(PT+CH-2)}" width="${barW.toFixed(1)}" height="${Math.max(bH,2).toFixed(1)}" fill="${col}" rx="2" opacity="0.9"/>`;
+    svg+=`<rect x="${x.toFixed(1)}" y="${bH>0?y.toFixed(1):(PT+CH-1)}" width="${barW.toFixed(1)}" height="${cost>0?Math.max(bH,2).toFixed(1):'1'}" fill="${col}" rx="2" opacity="${cost>0?'.9':'.45'}"/>`;
     svg+=`<rect x="${x.toFixed(1)}" y="${PT}" width="${barW.toFixed(1)}" height="${CH}" fill="transparent"/>`;
     svg+=`</g>`;
 
