@@ -299,6 +299,15 @@ enum AuthCommand {
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
     },
+    /// Show how to copy a provider's browser cURL request for manual auth
+    Curl {
+        /// Provider whose cURL capture instructions should be shown.
+        #[arg(long)]
+        provider: String,
+        /// Output format. Defaults to text.
+        #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
+        format: OutputFormat,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Default, ValueEnum)]
@@ -575,6 +584,13 @@ fn main() -> Result<()> {
         Command::Auth {
             command: AuthCommand::ImportCookies { provider, format },
         } => run_auth_import_cookies(
+            &providers,
+            provider,
+            json || matches!(format, OutputFormat::Json),
+        ),
+        Command::Auth {
+            command: AuthCommand::Curl { provider, format },
+        } => run_auth_curl_instructions(
             &providers,
             provider,
             json || matches!(format, OutputFormat::Json),
@@ -1803,6 +1819,76 @@ fn run_auth_import_cookies(
             anyhow::bail!("{}: {}", error.error, error.message);
         }
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CurlCaptureInstructions {
+    provider_id: String,
+    web_url: String,
+    request_name_contains: String,
+    target_field: String,
+    accepts: Vec<String>,
+    steps: Vec<String>,
+    note: String,
+}
+
+fn run_auth_curl_instructions(
+    providers: &[LoadedProvider],
+    provider: String,
+    json: bool,
+) -> Result<()> {
+    let matched = providers
+        .iter()
+        .find(|p| p.manifest.id.eq_ignore_ascii_case(&provider));
+    let Some(provider) = matched else {
+        anyhow::bail!("unknown provider: {provider}");
+    };
+
+    let provider_id = provider.manifest.id.clone();
+    let web_url = provider
+        .manifest
+        .usage_dashboard_url
+        .as_deref()
+        .or(provider.manifest.web_url.as_deref())
+        .unwrap_or("https://t3.chat/settings/customization")
+        .to_string();
+
+    if !provider_id.eq_ignore_ascii_case("t3chat") {
+        anyhow::bail!("cURL capture instructions are only defined for t3chat today");
+    }
+
+    let instructions = CurlCaptureInstructions {
+        provider_id,
+        web_url,
+        request_name_contains: "getCustomerData".to_string(),
+        target_field: "cookieHeader".to_string(),
+        accepts: vec!["fullCurl".to_string(), "cookieHeader".to_string()],
+        steps: vec![
+            "Open T3 Chat settings in the browser where you are logged in.".to_string(),
+            "Open Developer Tools, then the Network tab.".to_string(),
+            "Type getCustomerData in the Network filter.".to_string(),
+            "Refresh the T3 Chat settings page if the request is not visible.".to_string(),
+            "Right-click the getCustomerData request and choose Copy -> Copy as cURL.".to_string(),
+            "Paste the entire cURL command into the UsageStat T3 Chat Cookie header field.".to_string(),
+        ],
+        note: "For T3 Chat, the full cURL capture is more reliable than a raw Cookie header because Vercel may challenge cookie-only requests."
+            .to_string(),
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&instructions)?);
+    } else {
+        println!("T3 Chat cURL capture");
+        println!("Open: {}", instructions.web_url);
+        println!();
+        for (index, step) in instructions.steps.iter().enumerate() {
+            println!("{}. {}", index + 1, step);
+        }
+        println!();
+        println!("{}", instructions.note);
+    }
+    Ok(())
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

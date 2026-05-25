@@ -158,10 +158,23 @@
     })
   }
 
+  function isVercelChallenge(resp) {
+    if (!resp) return false
+    const headers = resp.headers || {}
+    const mitigated =
+      headers["x-vercel-mitigated"] ||
+      headers["X-Vercel-Mitigated"] ||
+      headers["X-Vercel-mitigated"]
+    return (
+      Number(resp.status) === 429 &&
+      String(mitigated || "").toLowerCase() === "challenge"
+    ) || String(resp.bodyText || "").indexOf("Vercel") !== -1
+  }
+
   function probe(ctx) {
     const requestCtx = requestContext(rawCredential(ctx))
     if (!requestCtx || !requestCtx.cookieHeader) {
-      throw "T3 Chat session not configured. Set T3CHAT_COOKIE or T3_CHAT_COOKIE.";
+      throw "T3 Chat session not configured. Paste a full browser cURL capture into the Cookie header field, or set T3CHAT_COOKIE/T3_CHAT_COOKIE."
     }
 
     const headers = {
@@ -181,7 +194,9 @@
       "x-trpc-batch": "true",
       "x-trpc-source": "web-client",
     }
-    for (const name in requestCtx.headers) headers[name] = requestCtx.headers[name]
+    if (requestCtx && requestCtx.headers) {
+      for (const name in requestCtx.headers) headers[name] = requestCtx.headers[name]
+    }
 
     const resp = ctx.util.request({
       method: "GET",
@@ -192,8 +207,8 @@
 
     if (ctx.util.isAuthStatus(resp.status)) throw "T3 Chat session cookie is invalid or expired."
     if (resp.status < 200 || resp.status >= 300) {
-      if (String(resp.bodyText || "").indexOf("Vercel") !== -1) {
-        throw "T3 Chat returned a Vercel security challenge. Paste the full browser cURL request, not just the Cookie header."
+      if (isVercelChallenge(resp)) {
+        throw "T3 Chat returned a Vercel security challenge. Paste the full browser cURL request into the Cookie header field, not just the Cookie header. Run `usagestat auth curl --provider t3chat` for steps."
       }
       throw "T3 Chat API error (HTTP " + resp.status + ")."
     }
