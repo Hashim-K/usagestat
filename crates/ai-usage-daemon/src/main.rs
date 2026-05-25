@@ -282,6 +282,9 @@ fn provider_summaries(providers: &[LoadedProvider], config: &AppConfig) -> Vec<P
             supported_modes: p.manifest.supported_modes.clone(),
             auto_mode: p.manifest.auto_mode.clone(),
             web_url: p.manifest.web_url.clone(),
+            status_page_url: p.manifest.resolved_status_page_url(),
+            usage_dashboard_url: p.manifest.resolved_usage_dashboard_url(),
+            icon: p.manifest.resolved_icon(&p.dir),
         })
         .collect()
 }

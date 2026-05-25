@@ -11,6 +11,7 @@ cargo build --release -p usagestat-cli --manifest-path "${repo_root}/Cargo.toml"
 mkdir -p "${bin_dir}"
 install -m 0755 "${repo_root}/target/release/usagestat" "${dev_bin}"
 mkdir -p "${plugin_dir}"
+find "${plugin_dir}" -name icon-color.svg -delete
 cp -a "${repo_root}/plugins/." "${plugin_dir}/"
 
 echo "Installed ${dev_bin}"

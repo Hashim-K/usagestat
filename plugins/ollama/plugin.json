@@ -12,6 +12,7 @@
   "supportedModes": ["web"],
   "autoMode": "web",
   "webUrl": "https://ollama.com",
+  "usageDashboardUrl": "https://ollama.com/settings",
   "lines": [
     { "type": "progress", "label": "Session", "scope": "overview" },
     { "type": "progress", "label": "Weekly", "scope": "detail" }

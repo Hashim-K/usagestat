@@ -6,6 +6,7 @@
 - Back `usagestat cost` and Codex/Claude cost rows with pinned ccusage runners, including total-token columns and 30-day cost summaries.
 - Add a local beta workflow: `scripts/install-dev.sh` installs `usagestat-dev` and synced dev plugins under `~/.local`.
 - Harden ccusage runner discovery and cleanup by resolving NVM default aliases and killing Unix child process groups on timeout.
+- Move provider icon and link metadata into plugin manifests/list output, with absolute monochrome SVG paths and separate color SVG paths where available.
 
 ## 1.0.2 - 2026-05-18
 

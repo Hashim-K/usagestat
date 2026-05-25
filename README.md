@@ -45,6 +45,10 @@ Bundled providers:
 - `opencode-go`, `openrouter`, `perplexity`, `stepfun`, `synthetic`, `t3chat`
 - `venice`, `vertex-ai`, `warp`, `windsurf`, `zai`
 
+`usagestat --json list` includes provider-owned UI metadata. Icon paths are
+resolved to absolute SVG paths; `icon.path` is the monochrome/default icon and
+`icon.colorPath` is present only when a separate color SVG is available.
+
 ## Config
 
 Default config path:

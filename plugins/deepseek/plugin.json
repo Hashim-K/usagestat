@@ -8,6 +8,7 @@
   "links": [
     { "label": "Platform", "url": "https://platform.deepseek.com/usage" }
   ],
+  "usageDashboardUrl": "https://platform.deepseek.com/usage",
   "supportedModes": ["api"],
   "autoMode": "api",
   "lines": [

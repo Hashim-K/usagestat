@@ -16,6 +16,7 @@
       "url": "https://opencode.ai/docs/go/"
     }
   ],
+  "usageDashboardUrl": "https://opencode.ai/auth",
   "supportedModes": ["local"],
   "autoMode": "local",
   "lines": [

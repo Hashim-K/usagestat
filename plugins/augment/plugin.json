@@ -9,6 +9,7 @@
     { "label": "Account", "url": "https://app.augmentcode.com/account" },
     { "label": "Status", "url": "https://status.augmentcode.com" }
   ],
+  "usageDashboardUrl": "https://app.augmentcode.com/account",
   "supportedModes": ["oauth", "local"],
   "autoMode": "oauth",
   "lines": [

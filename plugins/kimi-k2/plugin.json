@@ -8,6 +8,7 @@
   "links": [
     { "label": "Platform", "url": "https://platform.moonshot.cn" }
   ],
+  "usageDashboardUrl": "https://platform.moonshot.cn",
   "supportedModes": ["api"],
   "autoMode": "api",
   "lines": [
