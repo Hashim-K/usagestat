@@ -49,14 +49,29 @@
     return fields
   }
 
+  function cookieFieldsFromCurl(raw) {
+    const fields = []
+    const text = String(raw || "")
+    const re = /(?:^|\s)(?:-b|--cookie)(?:\s+|=)(?:"([^"]*)"|'([^']*)'|(\S+))/g
+    let match
+    while ((match = re.exec(text)) !== null) {
+      fields.push(unquoteShell(match[1] || match[2] || match[3] || ""))
+    }
+    return fields
+  }
+
   function requestContext(raw) {
     raw = String(raw || "").trim()
     if (!raw) return null
     const fields = headerFieldsFromCurl(raw)
-    if (!fields.length) return { cookieHeader: raw, headers: {} }
+    const cookieFields = cookieFieldsFromCurl(raw)
+    if (!fields.length && !cookieFields.length) return { cookieHeader: raw, headers: {} }
 
     let cookie = ""
     const headers = {}
+    if (cookieFields.length) {
+      cookie = cookieFields[cookieFields.length - 1]
+    }
     for (let i = 0; i < fields.length; i += 1) {
       const field = fields[i]
       const idx = field.indexOf(":")
