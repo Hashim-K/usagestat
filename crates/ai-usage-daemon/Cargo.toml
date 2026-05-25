@@ -12,6 +12,7 @@ path = "src/main.rs"
 usagestat-core = { path = "../ai-usage-core" }
 usagestat-plugins = { path = "../ai-usage-plugins" }
 anyhow.workspace = true
+chrono.workspace = true
 clap.workspace = true
 env_logger.workspace = true
 log.workspace = true
