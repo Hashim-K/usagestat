@@ -742,7 +742,12 @@ fn run_probe(
             eprintln!("usagestat:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
         }
         let source = resolve_source_mode(cli_source, web, &provider.manifest.id, config);
-        let mut snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
+        let mut snap = batch_probe::run_probe_with_timeout(
+            provider,
+            &source,
+            config.provider_config(&provider.manifest.id),
+            Some(&interrupt),
+        );
         snap.status_page_url = status_page_url_for(&provider.manifest.id);
         snap.pace = snap.compute_pace();
         if save {
@@ -1562,7 +1567,12 @@ fn run_export(
         for (i, provider) in selected.iter().enumerate() {
             eprintln!("usagestat:   [{}/{}] {}…", i + 1, n, provider.manifest.id);
             let source = config.source_mode(&provider.manifest.id).to_string();
-            let snap = batch_probe::run_probe_with_timeout(provider, &source, Some(&interrupt));
+            let snap = batch_probe::run_probe_with_timeout(
+                provider,
+                &source,
+                config.provider_config(&provider.manifest.id),
+                Some(&interrupt),
+            );
             recs.push(history::record_from_snapshot(&snap));
         }
         recs

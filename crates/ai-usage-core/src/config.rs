@@ -120,6 +120,10 @@ impl AppConfig {
             .map(|s| s.as_str())
             .unwrap_or("auto")
     }
+
+    pub fn provider_config(&self, provider_id: &str) -> Option<&ProviderConfig> {
+        self.providers.iter().find(|p| p.id == provider_id)
+    }
 }
 
 #[derive(Debug, Error)]

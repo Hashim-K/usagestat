@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::{Duration, Instant};
-use usagestat_core::{LoadedProvider, UsageSnapshot};
+use usagestat_core::{LoadedProvider, ProviderConfig, UsageSnapshot};
 use usagestat_plugins::probe_provider;
 
 pub fn probe_timeout_secs() -> u64 {
@@ -38,6 +38,7 @@ pub fn register_interrupt_flag() -> Result<Arc<AtomicBool>> {
 pub fn run_probe_with_timeout(
     provider: &LoadedProvider,
     source_mode: &str,
+    provider_config: Option<&ProviderConfig>,
     interrupt: Option<&Arc<AtomicBool>>,
 ) -> UsageSnapshot {
     let provider_id = provider.manifest.id.clone();
@@ -46,9 +47,14 @@ pub fn run_probe_with_timeout(
 
     let provider_thread = provider.clone();
     let source_thread = source_mode.to_string();
+    let config_thread = provider_config.cloned();
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
-        let _ = tx.send(probe_provider(&provider_thread, &source_thread));
+        let _ = tx.send(probe_provider(
+            &provider_thread,
+            &source_thread,
+            config_thread.as_ref(),
+        ));
     });
 
     const TICK: Duration = Duration::from_millis(200);

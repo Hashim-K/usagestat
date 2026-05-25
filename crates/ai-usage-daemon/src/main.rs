@@ -81,7 +81,11 @@ fn start_poller(
             for provider in &providers {
                 if config.is_enabled(&provider.manifest.id, provider.manifest.enabled_by_default) {
                     let source = config.source_mode(&provider.manifest.id);
-                    let snapshot = probe_provider(provider, source);
+                    let snapshot = probe_provider(
+                        provider,
+                        source,
+                        config.provider_config(&provider.manifest.id),
+                    );
                     let mut guard = state.lock().expect("app state poisoned");
                     guard.cache.upsert(snapshot);
                     if let Err(e) = guard.cache.save(&cache_path) {

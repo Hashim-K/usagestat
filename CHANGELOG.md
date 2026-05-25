@@ -7,6 +7,7 @@
 - Add a local beta workflow: `scripts/install-dev.sh` installs `usagestat-dev` and synced dev plugins under `~/.local`.
 - Harden ccusage runner discovery and cleanup by resolving NVM default aliases and killing Unix child process groups on timeout.
 - Move provider icon and link metadata into plugin manifests/list output, with absolute monochrome SVG paths and separate color SVG paths where available.
+- Add T3 Chat web probing with configured cookie/cURL-header support for Vercel-protected sessions.
 
 ## 1.0.2 - 2026-05-18
 

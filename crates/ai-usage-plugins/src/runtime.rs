@@ -2,10 +2,15 @@ use crate::host_api;
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
 use usagestat_core::{
-    LoadedProvider, MetricLine, ProgressFormat, ProviderManifest, UsageSnapshot, paths,
+    LoadedProvider, MetricLine, ProgressFormat, ProviderConfig, ProviderManifest, UsageSnapshot,
+    paths,
 };
 
-pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnapshot {
+pub fn probe_provider(
+    provider: &LoadedProvider,
+    source_mode: &str,
+    provider_config: Option<&ProviderConfig>,
+) -> UsageSnapshot {
     if let Some(error) = provider.manifest.check_mode(source_mode) {
         return UsageSnapshot::error(
             provider.manifest.id.clone(),
@@ -30,7 +35,7 @@ pub fn probe_provider(provider: &LoadedProvider, source_mode: &str) -> UsageSnap
     };
 
     ctx.with(|ctx| {
-        run_in_context(ctx, provider, source_mode).unwrap_or_else(|message| {
+        run_in_context(ctx, provider, source_mode, provider_config).unwrap_or_else(|message| {
             UsageSnapshot::error(
                 provider.manifest.id.clone(),
                 provider.manifest.name.clone(),
@@ -44,8 +49,9 @@ fn run_in_context(
     ctx: Ctx<'_>,
     provider: &LoadedProvider,
     source_mode: &str,
+    provider_config: Option<&ProviderConfig>,
 ) -> Result<UsageSnapshot, String> {
-    inject_context(&ctx, &provider.manifest, source_mode)
+    inject_context(&ctx, &provider.manifest, source_mode, provider_config)
         .map_err(|_| "host api injection failed".to_string())?;
 
     ctx.eval::<(), _>(provider.entry_script.as_bytes())
@@ -105,6 +111,7 @@ fn inject_context(
     ctx: &Ctx<'_>,
     manifest: &ProviderManifest,
     source_mode: &str,
+    provider_config: Option<&ProviderConfig>,
 ) -> rquickjs::Result<()> {
     let globals = ctx.globals();
     let app = Object::new(ctx.clone())?;
@@ -124,6 +131,29 @@ fn inject_context(
     probe_ctx.set("sourceMode", source_mode)?;
     if let Some(web_url) = &manifest.web_url {
         probe_ctx.set("webUrl", web_url.as_str())?;
+    }
+    if let Some(provider_config) = provider_config {
+        let provider_obj = Object::new(ctx.clone())?;
+        provider_obj.set("id", provider_config.id.as_str())?;
+        if let Some(instance_id) = &provider_config.instance_id {
+            provider_obj.set("instanceId", instance_id.as_str())?;
+        }
+        if let Some(display_name) = &provider_config.display_name {
+            provider_obj.set("displayName", display_name.as_str())?;
+        }
+        if let Some(api_key) = &provider_config.api_key {
+            provider_obj.set("apiKey", api_key.as_str())?;
+        }
+        if let Some(cookie_header) = &provider_config.cookie_header {
+            provider_obj.set("cookieHeader", cookie_header.as_str())?;
+        }
+        if let Some(region) = &provider_config.region {
+            provider_obj.set("region", region.as_str())?;
+        }
+        if let Some(workspace_id) = &provider_config.workspace_id {
+            provider_obj.set("workspaceId", workspace_id.as_str())?;
+        }
+        probe_ctx.set("provider", provider_obj)?;
     }
     probe_ctx.set("app", app)?;
     globals.set("__usagestat_ctx", probe_ctx.clone())?;

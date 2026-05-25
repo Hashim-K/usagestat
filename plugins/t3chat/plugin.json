@@ -9,6 +9,7 @@
     { "label": "Customization", "url": "https://t3.chat/settings/customization" },
     { "label": "Subscription", "url": "https://t3.chat/settings/subscription" }
   ],
+  "usageDashboardUrl": "https://t3.chat/settings/customization",
   "supportedModes": ["web"],
   "autoMode": "web",
   "webUrl": "https://t3.chat",
