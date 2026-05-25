@@ -8,6 +8,12 @@ The CLI is intended to grow into a superset of CodexBar's CLI capabilities.
 `usage`, `status`, `cost`, `config`, and `cache` mirror CodexBar's command
 families where the backend already has equivalent data.
 
+Future provider UX work should consider standardizing common usage-window
+labels and ordering across plugins. CodexBar tracks this as a low-priority
+polish item so providers with comparable limits are easier to scan side by
+side, while still allowing provider-specific labels for balances, credits, and
+model-specific quota pools.
+
 ## Running The CLI
 
 From a checkout, run the binary through Cargo:

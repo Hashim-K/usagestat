@@ -1824,6 +1824,7 @@ dependencies = [
  "clap",
  "env_logger",
  "log",
+ "serde",
  "serde_json",
  "usagestat-core",
  "usagestat-plugins",

@@ -85,7 +85,10 @@ Use this to check whether the daemon is running before rendering anything.
 
 ### `GET /v1/providers`
 
-Returns the list of discovered providers and their enabled state.
+Returns the list of discovered providers and their enabled state. Providers are
+ordered by their `[[providers]]` order in config, with unlisted providers sorted
+by id after configured providers. UI clients should keep this order when showing
+tabs, bar items, and detail pages.
 
 ```json
 [
