@@ -795,9 +795,14 @@ async function renderProvider(id){
   const history = await fetchHistory(id);
   renderStatsSection(id, snap, history, null);
   renderHistorySection(id, history, snap);
-  fetchCcusageReports(id).then(reports=>renderStatsSection(id, snap, history, reports));
+  const reportsPromise = fetchCcusageReports(id).then(reports=>{
+    renderStatsSection(id, snap, history, reports);
+    renderHistorySection(id, history, snap, reports);
+    return reports;
+  });
   const cost = await fetchCost(id);
   renderCostSection(id, cost, history);
+  await reportsPromise.catch(()=>null);
 }
 
 function renderStatsSection(id, snap, rawHistory, reports){
@@ -923,7 +928,7 @@ function formatScalar(value, format){
   return `${fmtNum(n)} ${format?.suffix||''}`.trim();
 }
 
-function renderHistorySection(id, raw, snap){
+function renderHistorySection(id, raw, snap, reports){
   const box = document.getElementById(`history-box-${id}`);
   if(!box) return;
   box.innerHTML = `<div class="box-title">Usage History</div>`;
@@ -944,6 +949,15 @@ function renderHistorySection(id, raw, snap){
   const totalCacheCreate = sum(recent, 'cacheCreationTokens');
   const totalCost = sum(recent, 'cost');
   const activeDays = new Set(recent.map(r=>String(r.ts).slice(0,10))).size;
+  const localDaily = reportRows(reports?.daily, 'daily').map(normalizeCostRow).filter(r=>r.date);
+  const summaryRows = localDaily.length ? calendarWindow(localDaily, 30) : [];
+  const summaryTotals = summaryRows.length ? usageTotals(summaryRows) : null;
+  const summaryActiveDays = summaryRows.length ? summaryRows.filter(r=>rowCost(r)>0 || rowTotalTokens(r)>0).length : activeDays;
+  const summaryInput = summaryTotals ? summaryTotals.inputTokens : totalInput;
+  const summaryOutput = summaryTotals ? summaryTotals.outputTokens : totalOutput;
+  const summaryCacheRead = summaryTotals ? summaryTotals.cacheReadTokens : totalCacheRead;
+  const summaryCacheCreate = summaryTotals ? summaryTotals.cacheCreationTokens : totalCacheCreate;
+  const summaryCost = summaryTotals ? summaryTotals.cost : totalCost;
 
   let html = `<div class="history-grid">`;
   html+=`<div>`;
@@ -962,16 +976,16 @@ function renderHistorySection(id, raw, snap){
   html+=`<div><div class="insight-grid">`;
   html+=insight(`${fmtPct(latest.primaryPercent)}`, 'latest usage');
   html+=insight(fmtPct((latest.primaryPercent||0)-(first.primaryPercent||0), true), 'window change');
-  html+=insight(fmtTok(totalInput), 'input tokens');
-  html+=insight(fmtTok(totalOutput), 'output tokens');
-  html+=insight(totalCost>0?`$${totalCost.toFixed(2)}`:'—', 'reported cost');
-  html+=insight(String(activeDays), 'days sampled');
+  html+=insight(fmtTok(summaryInput), 'input tokens');
+  html+=insight(fmtTok(summaryOutput), 'output tokens');
+  html+=insight(summaryCost>0?`$${summaryCost.toFixed(2)}`:'—', 'reported cost');
+  html+=insight(summaryRows.length?`${summaryActiveDays}/${summaryRows.length}`:String(activeDays), 'active days');
   html+=`</div>`;
   html+=`<div style="margin-top:14px">`;
-  html+=seriesRow('Input', totalInput, '#58a6ff', fmtTok);
-  html+=seriesRow('Output', totalOutput, '#7ee787', fmtTok);
-  html+=seriesRow('Cache read', totalCacheRead, '#a371f7', fmtTok);
-  html+=seriesRow('Cache write', totalCacheCreate, '#e3b341', fmtTok);
+  html+=seriesRow('Input', summaryInput, '#58a6ff', fmtTok);
+  html+=seriesRow('Output', summaryOutput, '#7ee787', fmtTok);
+  html+=seriesRow('Cache read', summaryCacheRead, '#a371f7', fmtTok);
+  html+=seriesRow('Cache write', summaryCacheCreate, '#e3b341', fmtTok);
   html+=`</div></div></div>`;
 
   box.insertAdjacentHTML('beforeend', html);
