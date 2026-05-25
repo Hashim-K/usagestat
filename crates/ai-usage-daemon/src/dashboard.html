@@ -94,6 +94,18 @@ header{
 .ring-svg{position:absolute;inset:2px;width:calc(100% - 4px);height:calc(100% - 4px)}
 .ring-t{fill:none;stroke:var(--blue);stroke-width:2.5;stroke-linecap:round;opacity:.38;
   transform:rotate(-90deg);transform-origin:center;transition:stroke-dashoffset 1s linear}
+@media(max-width:640px){
+  .shell{padding:16px 20px 44px}
+  header{flex-wrap:wrap}
+  .hstart{flex:1}
+  .hend{border-left:1px solid var(--bd);margin-left:auto}
+  .tab-bar{order:3;flex-basis:100%;border-left:0;border-top:1px solid var(--bd)}
+  .tab{min-height:42px;padding:0 14px}
+}
+@media(max-width:440px){
+  .ago{display:none}
+  .hend{gap:8px}
+}
 
 /* ── panels ── */
 .panels{margin-top:16px}
@@ -112,6 +124,25 @@ header{
   border-radius:5px;font:12px var(--mono);color:var(--bright)}
 
 /* ── overview grid ── */
+.overview-summary{display:grid;grid-template-columns:1.1fr .9fr;gap:16px;margin-bottom:16px}
+@media(max-width:980px){.overview-summary{grid-template-columns:1fr}}
+.overview-panel{
+  background:linear-gradient(180deg,color-mix(in srgb,var(--s0) 92%,var(--blue) 8%),var(--s0));
+  border:1px solid var(--bd);border-radius:var(--r);padding:16px 18px;
+}
+.overview-title{font-size:18px;font-weight:700;color:var(--hi);margin-bottom:4px}
+.overview-sub{font:12px var(--mono);color:var(--mu);margin-bottom:14px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+@media(max-width:760px){.kpi-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.kpi{background:color-mix(in srgb,var(--s1) 76%,transparent);border:1px solid var(--bd);border-radius:7px;padding:11px 12px}
+.kpi-value{font:700 21px/1 var(--mono);color:var(--hi);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-label{font:10px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu)}
+.pressure-list{display:flex;flex-direction:column;gap:9px}
+.pressure-row{display:grid;grid-template-columns:minmax(90px,1fr) 70px 1.8fr;gap:10px;align-items:center}
+.pressure-name{font:12px var(--mono);color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pressure-value{font:12px var(--mono);color:var(--mu);text-align:right}
+.pressure-track{height:5px;background:var(--s2);border-radius:999px;overflow:hidden}
+.pressure-fill{height:100%;border-radius:999px;background:var(--blue)}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px}
 .sk-card{height:240px;background:var(--s0);border:1px solid var(--bd);border-radius:var(--r);
   position:relative;overflow:hidden}
@@ -200,7 +231,7 @@ header{
 .slink svg{width:10px;height:10px}
 
 /* ── PROVIDER DETAIL ── */
-.detail{max-width:1100px}
+.detail{max-width:1280px}
 
 .detail-header{
   display:flex;align-items:flex-start;justify-content:space-between;
@@ -215,7 +246,7 @@ header{
 .dh-pct-lbl{font:11px var(--mono);color:var(--mu);margin-top:4px;text-transform:uppercase;letter-spacing:.08em}
 
 /* two-col split */
-.detail-cols{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.detail-cols{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin-bottom:16px;align-items:start}
 @media(max-width:700px){.detail-cols{grid-template-columns:1fr}}
 
 .detail-box{background:var(--s0);border:1px solid var(--bd);border-radius:var(--r);padding:18px 20px}
@@ -322,7 +353,7 @@ header{
 .insight{background:var(--s1);border:1px solid var(--bd);border-radius:7px;padding:11px 12px;min-width:0}
 .insight-value{font:700 18px/1.1 var(--mono);color:var(--tx);margin-bottom:5px;overflow:hidden;text-overflow:ellipsis}
 .insight-label{font:10px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu)}
-.stats-box{background:var(--s0);border:1px solid var(--bd);border-radius:var(--r);padding:20px;margin-bottom:16px}
+.stats-box{background:var(--s0);border:1px solid var(--bd);border-radius:var(--r);padding:20px;margin-bottom:16px;overflow-x:auto}
 .stats-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:16px}
 @media(max-width:1000px){.stats-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.stats-grid{grid-template-columns:1fr}}
@@ -373,6 +404,7 @@ header{
 
   <div class="panels">
     <div id="panel-overview" class="panel active">
+      <div id="overviewSummary" class="overview-summary"></div>
       <div id="grid" class="grid">
         <div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div>
       </div>
@@ -514,6 +546,7 @@ function buildTabs(){
 // ── overview ─────────────────────────────────────────────────────────────────
 function renderOverview(){
   const grid=document.getElementById('grid');
+  renderOverviewSummary();
   if(!S.snapshots.length){grid.innerHTML='';return;}
   let html='';
   orderedSnapshots().forEach((s,i)=>{
@@ -565,6 +598,64 @@ function renderOverview(){
   });
   grid.innerHTML=html;
   animateBarsAndArcs(grid);
+}
+
+function renderOverviewSummary(){
+  const el = document.getElementById('overviewSummary');
+  if(!el) return;
+  const snaps = orderedSnapshots();
+  if(!snaps.length){ el.innerHTML=''; return; }
+
+  const progressRows = snaps.flatMap(s=>(s.metrics||[])
+    .filter(m=>m.type==='progress' && m.format?.kind==='percent' && m.limit>0)
+    .map(m=>({ snap:s, metric:m, percent:pct(m) })));
+  const primaryRows = snaps.map(s=>{
+    const m = (s.metrics||[]).find(row=>row.type==='progress' && row.format?.kind==='percent' && row.limit>0);
+    return m ? { snap:s, metric:m, percent:pct(m) } : null;
+  }).filter(Boolean);
+  const pressure = primaryRows.slice().sort((a,b)=>b.percent-a.percent);
+  const highest = pressure[0];
+  const avg = primaryRows.length ? primaryRows.reduce((acc,row)=>acc+row.percent,0)/primaryRows.length : null;
+  const nearLimit = progressRows.filter(row=>row.percent>=80).length;
+  const live = snaps.filter(s=>s.source!=='error').length;
+  const withPace = snaps.filter(s=>s.pace).length;
+  const resets = progressRows
+    .filter(row=>row.metric.resetsAt)
+    .sort((a,b)=>new Date(a.metric.resetsAt)-new Date(b.metric.resetsAt));
+  const nextReset = resets[0];
+  const updated = snaps.map(s=>+new Date(s.fetchedAt||0)).filter(Boolean).sort((a,b)=>b-a)[0];
+
+  let html = `<div class="overview-panel">`;
+  html+=`<div class="overview-title">Provider Health</div>`;
+  html+=`<div class="overview-sub">${esc(snaps.length)} providers · ${esc(progressRows.length)} quota lines · ${esc(withPace)} paced</div>`;
+  html+=`<div class="kpi-grid">`;
+  html+=overviewKpi(`${live}/${snaps.length}`, 'live');
+  html+=overviewKpi(highest ? `${highest.percent.toFixed(0)}%` : '-', 'highest');
+  html+=overviewKpi(avg == null ? '-' : `${avg.toFixed(1)}%`, 'avg usage');
+  html+=overviewKpi(String(nearLimit), 'near limit');
+  html+=`</div></div>`;
+
+  html+=`<div class="overview-panel">`;
+  html+=`<div class="overview-title">Quota Pressure</div>`;
+  html+=`<div class="overview-sub">${nextReset ? esc(fmtReset(nextReset.metric.resetsAt)) : 'no reset window'} · ${updated ? esc(fmtAgo(new Date(updated).toISOString())) : 'not updated'}</div>`;
+  html+=`<div class="pressure-list">`;
+  for(const row of pressure.slice(0,5)){
+    const name = row.snap.displayName || row.snap.providerId;
+    const col = row.snap.pace ? paceColor(row.snap.pace.stage) : barCol(row.percent);
+    html+=`<div class="pressure-row">`;
+    html+=`<div class="pressure-name">${esc(name)}</div>`;
+    html+=`<div class="pressure-value">${row.percent.toFixed(1)}%</div>`;
+    html+=`<div class="pressure-track"><div class="pressure-fill" style="width:${row.percent.toFixed(2)}%;background:${col}"></div></div>`;
+    html+=`</div>`;
+  }
+  if(!pressure.length) html+=`<div class="cost-unavail" style="padding:18px">No quota data reported</div>`;
+  html+=`</div></div>`;
+
+  el.innerHTML = html;
+}
+
+function overviewKpi(value,label){
+  return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div></div>`;
 }
 
 // ── provider detail ───────────────────────────────────────────────────────────
@@ -631,7 +722,7 @@ async function renderProvider(id){
     html+=`<div class="pace-stats">`;
     html+=`<div class="pstat"><div class="pstat-label">vs Schedule</div><div class="pstat-value ${dCls}">${fmtDelta(pace.deltaPercent)}</div></div>`;
     html+=`<div class="pstat"><div class="pstat-label">Quota ETA</div><div class="pstat-value">${fmtEta(pace.etaSeconds,pace.stage)}</div></div>`;
-    html+=`<div class="pstat"><div class="pstat-label">Lasts to Reset</div><div class="pstat-value ${pace.willLastToReset?'ok':'no'}">${pace.willLastToReset?'Yes ✓':'No ✗'}</div></div>`;
+    html+=`<div class="pstat"><div class="pstat-label">Lasts to Reset</div><div class="pstat-value ${pace.willLastToReset?'ok':'no'}">${pace.willLastToReset?'Yes':'No'}</div></div>`;
     html+=`<div class="pstat"><div class="pstat-label">Burn Rate</div><div class="pstat-value">${pace.actualUsedPercent>0&&pace.expectedUsedPercent>0?(pace.actualUsedPercent/pace.expectedUsedPercent).toFixed(2)+'×':'—'}</div></div>`;
     html+=`</div>`;
   } else {
@@ -1177,8 +1268,8 @@ function buildChart(containerId, daily){
   for(let i=0;i<=4;i++){
     const y=PT+CH*(1-i/4);
     const v=maxCost*i/4;
-    svg+=`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="#2d333b" stroke-width="1"/>`;
-    svg+=`<text x="${PL-6}" y="${y+4}" text-anchor="end" fill="#7d8590" font-size="11" font-family="monospace">$${v<10?v.toFixed(2):v.toFixed(1)}</text>`;
+    svg+=`<line x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}" stroke="#e4e4e410" stroke-width="1"/>`;
+    svg+=`<text x="${PL-6}" y="${y+4}" text-anchor="end" fill="#8e9297" font-size="11" font-family="monospace">$${v<10?v.toFixed(2):v.toFixed(1)}</text>`;
   }
 
   // bars
@@ -1188,7 +1279,7 @@ function buildChart(containerId, daily){
     const bH=CH*(cost/maxCost)||0;
     const y=PT+CH-bH;
     const rel=cost/maxCost;
-    const col=rel<0.25?'#26c6da':rel<0.5?'#7ee787':rel<0.75?'#e3b341':'#f85149';
+    const col=rel<0.25?'#7289da':rel<0.5?'#43b581':rel<0.75?'#eaca8b':'#d25050';
 
     svg+=`<g class="bar-g" data-date="${d.date}" data-cost="${cost.toFixed(4)}"
             data-tokens="${d.totalTokens||0}" data-models="${esc((d.modelsUsed||[]).join(', '))}">`;
@@ -1199,7 +1290,7 @@ function buildChart(containerId, daily){
     // x-axis labels — show every N days so they don't overlap
     const every = Math.max(1, Math.ceil(daily.length/10));
     if(i%every===0||i===daily.length-1)
-      svg+=`<text x="${(x+barW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" fill="#7d8590" font-size="10" font-family="monospace">${d.date.slice(5)}</text>`;
+      svg+=`<text x="${(x+barW/2).toFixed(1)}" y="${H-6}" text-anchor="middle" fill="#8e9297" font-size="10" font-family="monospace">${d.date.slice(5)}</text>`;
   });
 
   svg+=`</svg>`;
