@@ -1774,7 +1774,14 @@ fn run_auth_import_cookies(
 
     let result = auth_cookies::import_cookies(&provider, &web_url);
     match result {
-        Ok(imported) => {
+        Ok(mut imported) => {
+            if imported.provider_id.eq_ignore_ascii_case("t3chat") {
+                imported.requires_full_curl_on_challenge = Some(true);
+                imported.full_curl_instructions = Some(
+                    "T3 Chat may reject cookie-only requests with a Vercel security challenge. If usage probing reports that challenge, paste the full browser cURL for the t3.chat getCustomerData request into the Cookie header field."
+                        .to_string(),
+                );
+            }
             if json {
                 println!("{}", serde_json::to_string_pretty(&imported)?);
             } else {
@@ -1782,6 +1789,9 @@ fn run_auth_import_cookies(
                     "Imported cookies for {} from {} profile {}.",
                     imported.provider_id, imported.source, imported.profile
                 );
+                if let Some(instructions) = &imported.full_curl_instructions {
+                    println!("{instructions}");
+                }
             }
             Ok(())
         }

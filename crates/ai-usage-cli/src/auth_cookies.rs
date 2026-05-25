@@ -21,6 +21,10 @@ pub struct CookieImportResult {
     pub cookie_header: String,
     pub source: String,
     pub profile: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requires_full_curl_on_challenge: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub full_curl_instructions: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,6 +111,8 @@ pub fn import_cookies(
             cookie_header,
             source: profile.browser_id.to_string(),
             profile: profile.profile,
+            requires_full_curl_on_challenge: None,
+            full_curl_instructions: None,
         });
     }
 
