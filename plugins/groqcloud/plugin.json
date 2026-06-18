@@ -13,6 +13,7 @@
   "autoMode": "api",
   "lines": [
     { "type": "text", "label": "Requests", "scope": "overview", "primaryOrder": 1 },
-    { "type": "text", "label": "Tokens", "scope": "detail" }
+    { "type": "text", "label": "Tokens", "scope": "detail" },
+    { "type": "text", "label": "Cache hits", "scope": "detail" }
   ]
 }
