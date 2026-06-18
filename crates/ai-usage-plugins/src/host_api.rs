@@ -213,6 +213,7 @@ pub fn inject<'js>(
     inject_ccusage(ctx, &host, plugin_id)?;
     inject_usage_daily(ctx, &host, plugin_id)?;
     inject_cursor_logs(ctx, &host)?;
+    inject_cursor_usage_export(ctx, &host)?;
     inject_fireworks(ctx, &host, plugin_id)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
@@ -220,6 +221,7 @@ pub fn inject<'js>(
     patch_ccusage_wrapper(ctx)?;
     patch_usage_daily_wrapper(ctx)?;
     patch_cursor_logs_wrapper(ctx)?;
+    patch_cursor_usage_export_wrapper(ctx)?;
     patch_fireworks_wrapper(ctx)?;
     inject_utils(ctx)?;
     Ok(())
@@ -919,6 +921,45 @@ fn inject_cursor_logs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Resu
     Ok(())
 }
 
+fn inject_cursor_usage_export<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let export_obj = Object::new(ctx.clone())?;
+
+    export_obj.set(
+        "_queryMtdRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                Ok(crate::cursor_usage_export::query_mtd_host_json(&opts_json))
+            },
+        )?,
+    )?;
+    export_obj.set(
+        "_queryStatsRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                Ok(crate::cursor_usage_export::query_usage_stats_host_json(
+                    &opts_json,
+                ))
+            },
+        )?,
+    )?;
+    export_obj.set(
+        "_queryDailyRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                Ok(crate::cursor_usage_export::query_daily_billing_host_json(
+                    &opts_json,
+                ))
+            },
+        )?,
+    )?;
+
+    host.set("cursorUsageExport", export_obj)?;
+    Ok(())
+}
+
 fn firectl_runner_candidates() -> [&'static str; 3] {
     [
         "firectl",
@@ -1247,6 +1288,68 @@ fn patch_cursor_logs_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                 } catch (_) {}
                 return { status: "no_data", data: { daily: [] } };
             };
+        })();
+        "#
+        .as_bytes(),
+    )
+}
+
+fn patch_cursor_usage_export_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            if (!__usagestat_ctx.host.cursorUsageExport) return;
+            function cursorExportOpts(opts) {
+                var o = opts && typeof opts === "object" ? Object.assign({}, opts) : {};
+                if (!o.pluginId) {
+                    o.pluginId = globalThis.__OPENUSAGE_PLUGIN_REGISTRATION_ID__ ||
+                        (__usagestat_ctx.provider && __usagestat_ctx.provider.id) ||
+                        "cursor";
+                }
+                return JSON.stringify(o);
+            }
+
+            var mtdRawFn = __usagestat_ctx.host.cursorUsageExport._queryMtdRaw;
+            if (typeof mtdRawFn === "function") {
+                __usagestat_ctx.host.cursorUsageExport.queryMtd = function(opts) {
+                    var result = mtdRawFn(cursorExportOpts(opts));
+                    try {
+                        var parsed = JSON.parse(result);
+                        if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                            return parsed;
+                        }
+                    } catch (_) {}
+                    return { status: "error", message: "invalid MTD response" };
+                };
+            }
+
+            var statsRawFn = __usagestat_ctx.host.cursorUsageExport._queryStatsRaw;
+            if (typeof statsRawFn === "function") {
+                __usagestat_ctx.host.cursorUsageExport.queryStats = function(opts) {
+                    var result = statsRawFn(cursorExportOpts(opts));
+                    try {
+                        var parsed = JSON.parse(result);
+                        if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                            return parsed;
+                        }
+                    } catch (_) {}
+                    return { status: "error", message: "invalid usage stats response" };
+                };
+            }
+
+            var dailyRawFn = __usagestat_ctx.host.cursorUsageExport._queryDailyRaw;
+            if (typeof dailyRawFn === "function") {
+                __usagestat_ctx.host.cursorUsageExport.queryDaily = function(opts) {
+                    var result = dailyRawFn(cursorExportOpts(opts));
+                    try {
+                        var parsed = JSON.parse(result);
+                        if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                            return parsed;
+                        }
+                    } catch (_) {}
+                    return { status: "error", message: "invalid daily billing response" };
+                };
+            }
         })();
         "#
         .as_bytes(),
