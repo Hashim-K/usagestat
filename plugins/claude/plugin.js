@@ -709,83 +709,6 @@
     return parts.join(" · ")
   }
 
-  function modelTokenCount(modelUsage) {
-    if (!modelUsage || typeof modelUsage !== "object") return 0
-    const total = Number(modelUsage.totalTokens)
-    if (Number.isFinite(total) && total > 0) return total
-
-    const fields = [
-      "inputTokens",
-      "cachedInputTokens",
-      "cacheCreationTokens",
-      "cacheReadTokens",
-      "outputTokens",
-      "reasoningOutputTokens",
-    ]
-    let sum = 0
-    for (let i = 0; i < fields.length; i++) {
-      const n = Number(modelUsage[fields[i]])
-      if (Number.isFinite(n) && n > 0) sum += n
-    }
-    return sum
-  }
-
-  function collectModelUsage(daily) {
-    const totals = {}
-    let totalTokens = 0
-    for (let i = 0; i < daily.length; i++) {
-      const day = daily[i]
-      const models = day && day.models
-      if (models && typeof models === "object") {
-        const names = Object.keys(models)
-        for (let j = 0; j < names.length; j++) {
-          const name = names[j]
-          const tokens = modelTokenCount(models[name])
-          if (tokens <= 0) continue
-          totals[name] = (totals[name] || 0) + tokens
-          totalTokens += tokens
-        }
-      }
-
-      const breakdowns = day && day.modelBreakdowns
-      if (Array.isArray(breakdowns)) {
-        for (let j = 0; j < breakdowns.length; j++) {
-          const breakdown = breakdowns[j]
-          const name = String(
-            (breakdown && (breakdown.modelName || breakdown.name || breakdown.model)) || ""
-          ).trim()
-          if (!name) continue
-          const tokens = modelTokenCount(breakdown)
-          if (tokens <= 0) continue
-          totals[name] = (totals[name] || 0) + tokens
-          totalTokens += tokens
-        }
-      }
-    }
-
-    if (totalTokens <= 0) return []
-    return Object.keys(totals)
-      .map((name) => ({ name, tokens: totals[name], percent: (totals[name] / totalTokens) * 100 }))
-      .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
-  }
-
-  function percentLabel(value) {
-    if (value > 0 && value < 0.1) return "<0.1%"
-    const rounded = Math.round(value * 10) / 10
-    return (rounded % 1 === 0 ? String(Math.round(rounded)) : String(rounded)) + "%"
-  }
-
-  function pushModelUsageLines(lines, ctx, daily) {
-    const models = collectModelUsage(daily)
-    for (let i = 0; i < models.length; i++) {
-      const model = models[i]
-      lines.push(ctx.line.text({
-        label: model.name,
-        value: percentLabel(model.percent),
-      }))
-    }
-  }
-
   function usageDayLabel(rawDate) {
     const key = dayKeyFromUsageDate(rawDate)
     if (!key) return String(rawDate || "").slice(0, 10) || "Usage"
@@ -1431,7 +1354,6 @@
         }
 
         pushUsageChartLine(lines, ctx, usage.daily)
-        pushModelUsageLines(lines, ctx, usage.daily)
         persistUsageDaily(ctx, usage.daily, "Claude")
       }
     } catch (e) {
