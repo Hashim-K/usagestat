@@ -1013,7 +1013,7 @@ function renderCostSection(id, raw, history){
   if(!box) return;
   box.innerHTML = costHeaderHtml(id);
 
-  // resolve codexbar's array shape or our spec shape
+  // resolve legacy array-shaped cost responses or our spec shape
   let entry = null;
   if(Array.isArray(raw)) entry = raw[0];
   else if(raw && !raw.error) entry = raw;
@@ -1035,7 +1035,7 @@ function renderCostSection(id, raw, history){
     }
     const msg = box.querySelector('.cost-unavail') || document.createElement('div');
     msg.className='cost-unavail';
-    msg.innerHTML=`<strong>Cost history unavailable</strong>This provider has not reported cost data yet. Codex/Claude can also use <code style="font-size:12px;color:var(--teal)">codexbar</code> cost history when installed.`;
+    msg.innerHTML=`<strong>Cost history unavailable</strong>This provider has not reported cost data yet. Keep the daemon running, or probe with <code style="font-size:12px;color:var(--teal)">usagestat usage --save</code>, to build local cost history.`;
     if(!box.contains(msg)) box.appendChild(msg);
     return;
   }

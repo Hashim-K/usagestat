@@ -158,6 +158,8 @@ fn inject_context(
     probe_ctx.set("app", app)?;
     globals.set("__usagestat_ctx", probe_ctx.clone())?;
     globals.set("__ai_usage_ctx", probe_ctx.clone())?;
+    globals.set("__openusage_ctx", probe_ctx.clone())?;
+    globals.set("__OPENUSAGE_PLUGIN_REGISTRATION_ID__", manifest.id.as_str())?;
     host_api::inject(ctx, &probe_ctx, &manifest.id)?;
     Ok(())
 }

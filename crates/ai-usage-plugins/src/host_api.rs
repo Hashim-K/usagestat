@@ -1,11 +1,12 @@
 use crate::ccusage::{CcusageQueryOpts, query_status_json};
-use rquickjs::{Ctx, Exception, Function, Object};
+use rquickjs::{Ctx, Exception, Function, Object, function::Rest};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const ENV_ALLOWLIST: &[&str] = &[
     "USAGESTAT_PLUGIN_DIR",
@@ -15,6 +16,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "ALIBABA_CODING_PLAN_COOKIE",
     "ALIBABA_COOKIE",
     "ALIBABA_TOKEN_PLAN_COOKIE",
+    "APPDATA",
     "ARK_API_KEY",
     "AUGMENT_ACCESS_TOKEN",
     "AZURE_OPENAI_API_KEY",
@@ -38,6 +40,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "COMMAND_CODE_COOKIE",
     "COMMANDCODE_COOKIE",
     "CROF_API_KEY",
+    "CROFAI_API_KEY",
     "CURSOR_HOME",
     "DEEPGRAM_API_KEY",
     "DEEPGRAM_PROJECT_ID",
@@ -48,6 +51,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "ELEVENLABS_API_KEY",
     "ELEVENLABS_API_URL",
     "FACTORY_COOKIE",
+    "FIREWORKS_API_KEY",
     "GEMINI_API_KEY",
     "GH_TOKEN",
     "GITHUB_TOKEN",
@@ -64,6 +68,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "LLM_PROXY_API_KEY",
     "LLM_PROXY_API_URL",
     "LLM_PROXY_BASE_URL",
+    "LOCALAPPDATA",
     "MANUS_COOKIE",
     "MANUS_SESSION_TOKEN",
     "MIMO_COOKIE",
@@ -73,6 +78,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "MOONSHOT_KEY",
     "MOONSHOT_REGION",
     "NANOGPT_API_KEY",
+    "NEURALWATT_API_KEY",
     "OLLAMA_COOKIE",
     "OPENAI_API_KEY",
     "OPENAI_PLATFORM_API_KEY",
@@ -89,6 +95,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "WARP_API_KEY",
     "XI_API_KEY",
     "XIAOMI_MIMO_COOKIE",
+    "XDG_CONFIG_HOME",
     "ZAI_API_KEY",
     "ZAI_API_TOKEN",
 ];
@@ -141,6 +148,46 @@ struct CommandResponse {
     stderr: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LsDiscoverRequest {
+    process_name: String,
+    #[serde(default)]
+    markers: Vec<String>,
+    #[serde(default)]
+    csrf_flag: Option<String>,
+    #[serde(default)]
+    port_flag: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LsDiscoverResponse {
+    csrf: String,
+    ports: Vec<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extension_port: Option<u16>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FireworksBillingExportRequest {
+    #[serde(default)]
+    api_key: String,
+    #[serde(default)]
+    account_id: String,
+    #[serde(default)]
+    start_time: String,
+    #[serde(default)]
+    end_time: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FireworksBillingExportResponse {
+    status: String,
+}
+
 pub fn inject<'js>(
     ctx: &Ctx<'js>,
     probe_ctx: &Object<'js>,
@@ -150,13 +197,18 @@ pub fn inject<'js>(
     inject_log(ctx, &host, plugin_id)?;
     inject_env(ctx, &host)?;
     inject_fs(ctx, &host)?;
+    inject_keychain(ctx, &host, plugin_id)?;
+    inject_ls(ctx, &host)?;
     inject_http(ctx, &host)?;
     inject_command(ctx, &host)?;
     inject_sqlite(ctx, &host)?;
     inject_ccusage(ctx, &host, plugin_id)?;
+    inject_fireworks(ctx, &host)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
+    patch_ls_wrapper(ctx)?;
     patch_ccusage_wrapper(ctx)?;
+    patch_fireworks_wrapper(ctx)?;
     inject_utils(ctx)?;
     Ok(())
 }
@@ -314,8 +366,209 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
         )?,
     )?;
 
+    fs_obj.set(
+        "firstExisting",
+        Function::new(ctx.clone(), move |paths: Vec<String>| -> Option<String> {
+            first_existing_path(&paths)
+        })?,
+    )?;
+
+    fs_obj.set(
+        "firstExistingAppSupport",
+        Function::new(ctx.clone(), move |relative: String| -> Option<String> {
+            first_existing_app_support_path(&relative)
+        })?,
+    )?;
+
     host.set("fs", fs_obj)?;
     Ok(())
+}
+
+fn inject_keychain<'js>(
+    ctx: &Ctx<'js>,
+    host: &Object<'js>,
+    plugin_id: &str,
+) -> rquickjs::Result<()> {
+    let keychain_obj = Object::new(ctx.clone())?;
+
+    let pid_read = plugin_id.to_string();
+    keychain_obj.set(
+        "readGenericPassword",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>,
+                  service: String,
+                  account_args: Rest<Option<String>>|
+                  -> rquickjs::Result<String> {
+                let account = account_args
+                    .0
+                    .into_iter()
+                    .next()
+                    .flatten()
+                    .and_then(|value| non_empty_trimmed(&value));
+                log_keychain_read(&pid_read, &service, account.as_deref());
+                platform_keychain_read(&service, account.as_deref()).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item not found: {error}"),
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    let pid_read_current = plugin_id.to_string();
+    keychain_obj.set(
+        "readGenericPasswordForCurrentUser",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, service: String| -> rquickjs::Result<String> {
+                let account = current_keychain_account();
+                log_keychain_read(&pid_read_current, &service, Some(&account));
+                platform_keychain_read(&service, Some(&account)).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item not found: {error}"),
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    let pid_write = plugin_id.to_string();
+    keychain_obj.set(
+        "writeGenericPassword",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, service: String, value: String| -> rquickjs::Result<()> {
+                log::info!("[plugin:{pid_write}] keychain write: service={service}");
+                platform_keychain_write(&service, None, &value).map_err(|error| {
+                    Exception::throw_message(&ctx_inner, &format!("keychain write failed: {error}"))
+                })
+            },
+        )?,
+    )?;
+
+    let pid_write_current = plugin_id.to_string();
+    keychain_obj.set(
+        "writeGenericPasswordForCurrentUser",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, service: String, value: String| -> rquickjs::Result<()> {
+                let account = current_keychain_account();
+                log::info!(
+                    "[plugin:{pid_write_current}] keychain write: service={service}, account={}",
+                    redact_value(&account)
+                );
+                platform_keychain_write(&service, Some(&account), &value).map_err(|error| {
+                    Exception::throw_message(&ctx_inner, &format!("keychain write failed: {error}"))
+                })
+            },
+        )?,
+    )?;
+
+    let pid_write_account = plugin_id.to_string();
+    keychain_obj.set(
+        "writeGenericPasswordForAccount",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>,
+                  service: String,
+                  account: String,
+                  value: String|
+                  -> rquickjs::Result<()> {
+                let Some(account) = non_empty_trimmed(&account) else {
+                    return Err(Exception::throw_message(
+                        &ctx_inner,
+                        "keychain account must not be empty",
+                    ));
+                };
+                log::info!(
+                    "[plugin:{pid_write_account}] keychain write: service={service}, account={}",
+                    redact_value(&account)
+                );
+                platform_keychain_write(&service, Some(&account), &value).map_err(|error| {
+                    Exception::throw_message(&ctx_inner, &format!("keychain write failed: {error}"))
+                })
+            },
+        )?,
+    )?;
+
+    let pid_delete = plugin_id.to_string();
+    keychain_obj.set(
+        "deleteGenericPassword",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>,
+                  service: String,
+                  account_args: Rest<Option<String>>|
+                  -> rquickjs::Result<()> {
+                let account = account_args
+                    .0
+                    .into_iter()
+                    .next()
+                    .flatten()
+                    .and_then(|value| non_empty_trimmed(&value));
+                log::info!(
+                    "[plugin:{pid_delete}] keychain delete: service={service}, account={}",
+                    account
+                        .as_deref()
+                        .map(redact_value)
+                        .unwrap_or_else(|| "default".to_string())
+                );
+                platform_keychain_delete(&service, account.as_deref()).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain delete failed: {error}"),
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    host.set("keychain", keychain_obj)?;
+    Ok(())
+}
+
+fn inject_ls<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let ls_obj = Object::new(ctx.clone())?;
+    ls_obj.set(
+        "_discoverRaw",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, req_json: String| -> rquickjs::Result<String> {
+                let request: LsDiscoverRequest =
+                    serde_json::from_str(&req_json).map_err(|error| {
+                        Exception::throw_message(
+                            &ctx_inner,
+                            &format!("invalid language-server discovery request: {error}"),
+                        )
+                    })?;
+                let response = discover_language_server(&request);
+                serde_json::to_string(&response)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
+            },
+        )?,
+    )?;
+    host.set("ls", ls_obj)?;
+    Ok(())
+}
+
+fn patch_ls_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            if (!__usagestat_ctx.host.ls || !__usagestat_ctx.host.ls._discoverRaw) return;
+            var rawFn = __usagestat_ctx.host.ls._discoverRaw;
+            __usagestat_ctx.host.ls.discover = function(opts) {
+                var response = rawFn(JSON.stringify(opts || {}));
+                if (response === "null") return null;
+                try { return JSON.parse(response); } catch (_) { return null; }
+            };
+        })();
+        "#
+        .as_bytes(),
+    )
 }
 
 fn inject_http<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
@@ -478,15 +731,57 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                 }
             };
 
+            var b64chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            ctx.base64 = {
+                decode: function(str) {
+                    str = String(str || "").replace(/-/g, "+").replace(/_/g, "/");
+                    while (str.length % 4) str += "=";
+                    str = str.replace(/=+$/, "");
+                    var result = "";
+                    var len = str.length;
+                    var i = 0;
+                    while (i < len) {
+                        var remaining = len - i;
+                        var a = b64chars.indexOf(str.charAt(i++));
+                        var b = b64chars.indexOf(str.charAt(i++));
+                        var c = remaining > 2 ? b64chars.indexOf(str.charAt(i++)) : 0;
+                        var d = remaining > 3 ? b64chars.indexOf(str.charAt(i++)) : 0;
+                        if (a < 0 || b < 0 || c < 0 || d < 0) return "";
+                        var n = (a << 18) | (b << 12) | (c << 6) | d;
+                        result += String.fromCharCode((n >> 16) & 0xff);
+                        if (remaining > 2) result += String.fromCharCode((n >> 8) & 0xff);
+                        if (remaining > 3) result += String.fromCharCode(n & 0xff);
+                    }
+                    return result;
+                },
+                encode: function(str) {
+                    str = String(str || "");
+                    var result = "";
+                    var len = str.length;
+                    var i = 0;
+                    while (i < len) {
+                        var chunkStart = i;
+                        var a = str.charCodeAt(i++) & 0xff;
+                        var b = i < len ? str.charCodeAt(i++) & 0xff : 0;
+                        var c = i < len ? str.charCodeAt(i++) & 0xff : 0;
+                        var bytesInChunk = i - chunkStart;
+                        var n = (a << 16) | (b << 8) | c;
+                        result += b64chars.charAt((n >> 18) & 63);
+                        result += b64chars.charAt((n >> 12) & 63);
+                        result += bytesInChunk < 2 ? "=" : b64chars.charAt((n >> 6) & 63);
+                        result += bytesInChunk < 3 ? "=" : b64chars.charAt(n & 63);
+                    }
+                    return result;
+                }
+            };
+
             ctx.jwt = {
                 decodePayload: function(token) {
                     if (typeof token !== "string") return null;
                     var parts = token.split(".");
                     if (parts.length < 2) return null;
-                    var b64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-                    while (b64.length % 4) b64 += "=";
                     try {
-                        return JSON.parse(atob(b64));
+                        return JSON.parse(ctx.base64.decode(parts[1]));
                     } catch (_) {
                         return null;
                     }
@@ -546,6 +841,37 @@ fn inject_ccusage<'js>(
     Ok(())
 }
 
+fn inject_fireworks<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let fireworks_obj = Object::new(ctx.clone())?;
+    fireworks_obj.set(
+        "_exportBillingMetricsRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                let request: FireworksBillingExportRequest = serde_json::from_str(&opts_json)
+                    .unwrap_or(FireworksBillingExportRequest {
+                        api_key: String::new(),
+                        account_id: String::new(),
+                        start_time: String::new(),
+                        end_time: String::new(),
+                    });
+                let _ = (
+                    request.api_key,
+                    request.account_id,
+                    request.start_time,
+                    request.end_time,
+                );
+                serde_json::to_string(&FireworksBillingExportResponse {
+                    status: "no_runner".to_string(),
+                })
+                .map_err(|error| Exception::throw_message(&_ctx_inner, &error.to_string()))
+            },
+        )?,
+    )?;
+    host.set("fireworks", fireworks_obj)?;
+    Ok(())
+}
+
 fn patch_ccusage_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
     ctx.eval::<(), _>(
         r#"
@@ -567,6 +893,373 @@ fn patch_ccusage_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         "#
         .as_bytes(),
     )
+}
+
+fn patch_fireworks_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            if (!__usagestat_ctx.host.fireworks || !__usagestat_ctx.host.fireworks._exportBillingMetricsRaw) return;
+            var rawFn = __usagestat_ctx.host.fireworks._exportBillingMetricsRaw;
+            __usagestat_ctx.host.fireworks.exportBillingMetrics = function(opts) {
+                var result = rawFn(JSON.stringify(opts || {}));
+                try {
+                    var parsed = JSON.parse(result);
+                    if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                        return parsed;
+                    }
+                } catch (_) {}
+                return { status: "runner_failed" };
+            };
+        })();
+        "#
+        .as_bytes(),
+    )
+}
+
+fn first_existing_path(paths: &[String]) -> Option<String> {
+    paths
+        .iter()
+        .find(|path| expand_path(path).exists())
+        .cloned()
+}
+
+fn first_existing_app_support_path(relative: &str) -> Option<String> {
+    first_existing_path(&app_support_path_candidates(relative))
+}
+
+fn app_support_path_candidates(relative: &str) -> Vec<String> {
+    let rel = relative
+        .trim()
+        .trim_start_matches('/')
+        .trim_start_matches('\\');
+    if rel.is_empty() {
+        return Vec::new();
+    }
+
+    let mut paths = Vec::new();
+    let mut push_join = |base: Option<String>| {
+        if let Some(base) = base.and_then(|value| non_empty_trimmed(&value)) {
+            paths.push(format!("{}/{}", base.trim_end_matches(['/', '\\']), rel));
+        }
+    };
+
+    push_join(std::env::var("APPDATA").ok());
+    push_join(std::env::var("LOCALAPPDATA").ok());
+    push_join(std::env::var("XDG_CONFIG_HOME").ok());
+
+    if let Some(home) = home_dir() {
+        let home = home.to_string_lossy();
+        paths.push(format!("{home}/.config/{rel}"));
+        paths.push(format!("{home}/Library/Application Support/{rel}"));
+        paths.push(format!("{home}/AppData/Roaming/{rel}"));
+        paths.push(format!("{home}/AppData/Local/{rel}"));
+    }
+
+    paths
+}
+
+fn discover_language_server(request: &LsDiscoverRequest) -> Option<LsDiscoverResponse> {
+    if request.process_name.trim().is_empty() {
+        return None;
+    }
+
+    let output = if cfg!(target_os = "windows") {
+        return None;
+    } else if cfg!(target_os = "macos") {
+        Command::new("ps").args(["-axo", "pid=,command="]).output()
+    } else {
+        Command::new("ps").args(["-eo", "pid=,args="]).output()
+    }
+    .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in stdout.lines() {
+        if !line.contains(&request.process_name) {
+            continue;
+        }
+        if !request
+            .markers
+            .iter()
+            .all(|marker| marker.trim().is_empty() || line.contains(marker))
+        {
+            continue;
+        }
+
+        let csrf = request
+            .csrf_flag
+            .as_deref()
+            .and_then(|flag| extract_flag_value(line, flag))
+            .and_then(|value| non_empty_trimmed(&value))?;
+
+        let extension_port = request
+            .port_flag
+            .as_deref()
+            .and_then(|flag| extract_flag_value(line, flag))
+            .and_then(|value| value.parse::<u16>().ok());
+
+        let mut ports = Vec::new();
+        if let Some(port) = extension_port {
+            ports.push(port);
+        }
+        if ports.is_empty() {
+            continue;
+        }
+
+        return Some(LsDiscoverResponse {
+            csrf,
+            ports,
+            extension_port,
+        });
+    }
+
+    None
+}
+
+fn extract_flag_value(command: &str, flag: &str) -> Option<String> {
+    let flag = flag.trim();
+    if flag.is_empty() {
+        return None;
+    }
+    let flag_eq = format!("{flag}=");
+    let mut parts = command.split_whitespace().peekable();
+    while let Some(part) = parts.next() {
+        if part == flag {
+            return parts.next().map(clean_flag_value);
+        }
+        if let Some(rest) = part.strip_prefix(&flag_eq) {
+            return Some(clean_flag_value(rest));
+        }
+    }
+    None
+}
+
+fn clean_flag_value(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .to_string()
+}
+
+fn non_empty_trimmed(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+fn current_keychain_account() -> String {
+    std::env::var("USER")
+        .ok()
+        .and_then(|value| non_empty_trimmed(&value))
+        .or_else(|| {
+            std::env::var("USERNAME")
+                .ok()
+                .and_then(|value| non_empty_trimmed(&value))
+        })
+        .or_else(|| read_command_stdout("id", &["-un"]))
+        .unwrap_or_else(|| "usagestat-user".to_string())
+}
+
+fn read_command_stdout(program: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(program).args(args).output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn log_keychain_read(plugin_id: &str, service: &str, account: Option<&str>) {
+    if let Some(account) = account {
+        log::info!(
+            "[plugin:{plugin_id}] keychain read: service={service}, account={}",
+            redact_value(account)
+        );
+    } else {
+        log::info!("[plugin:{plugin_id}] keychain read: service={service}");
+    }
+}
+
+fn platform_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
+    if cfg!(target_os = "macos") {
+        macos_keychain_read(service, account)
+    } else if cfg!(target_os = "linux") {
+        linux_secret_tool_read(service, account)
+    } else {
+        Err("keychain access is not supported on this platform".to_string())
+    }
+}
+
+fn platform_keychain_write(
+    service: &str,
+    account: Option<&str>,
+    value: &str,
+) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        macos_keychain_write(service, account, value)
+    } else if cfg!(target_os = "linux") {
+        linux_secret_tool_write(service, account, value)
+    } else {
+        Err("keychain access is not supported on this platform".to_string())
+    }
+}
+
+fn platform_keychain_delete(service: &str, account: Option<&str>) -> Result<(), String> {
+    if cfg!(target_os = "macos") {
+        macos_keychain_delete(service, account)
+    } else if cfg!(target_os = "linux") {
+        linux_secret_tool_delete(service, account)
+    } else {
+        Err("keychain access is not supported on this platform".to_string())
+    }
+}
+
+fn macos_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
+    let mut command = Command::new("security");
+    command.arg("find-generic-password");
+    if let Some(account) = account {
+        command.args(["-a", account]);
+    }
+    command.args(["-s", service, "-w"]);
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(command_error(&output));
+    }
+    non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| "empty keychain item".to_string())
+}
+
+fn macos_keychain_write(service: &str, account: Option<&str>, value: &str) -> Result<(), String> {
+    let mut command = Command::new("security");
+    command.args(["add-generic-password", "-U"]);
+    if let Some(account) = account {
+        command.args(["-a", account]);
+    }
+    command.args(["-s", service, "-w", value]);
+    let output = command.output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&output))
+    }
+}
+
+fn macos_keychain_delete(service: &str, account: Option<&str>) -> Result<(), String> {
+    let mut command = Command::new("security");
+    command.arg("delete-generic-password");
+    if let Some(account) = account {
+        command.args(["-a", account]);
+    }
+    command.args(["-s", service]);
+    let output = command.output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&output))
+    }
+}
+
+fn linux_secret_tool_path() -> Option<&'static str> {
+    ["/usr/bin/secret-tool", "secret-tool"]
+        .into_iter()
+        .find(|candidate| {
+            candidate.contains('/') && std::path::Path::new(candidate).is_file()
+                || !candidate.contains('/')
+        })
+}
+
+fn linux_secret_tool_read(service: &str, account: Option<&str>) -> Result<String, String> {
+    let Some(secret_tool) = linux_secret_tool_path() else {
+        return Err("secret-tool not installed".to_string());
+    };
+    let mut command = Command::new(secret_tool);
+    command.args(["lookup", "service", service]);
+    if let Some(account) = account {
+        command.args(["username", account]);
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(command_error(&output));
+    }
+    non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
+        .ok_or_else(|| "secret-tool returned empty secret".to_string())
+}
+
+fn linux_secret_tool_write(
+    service: &str,
+    account: Option<&str>,
+    value: &str,
+) -> Result<(), String> {
+    let Some(secret_tool) = linux_secret_tool_path() else {
+        return Err("secret-tool not installed".to_string());
+    };
+    let mut command = Command::new(secret_tool);
+    command.args(["store", "--label", service, "service", service]);
+    if let Some(account) = account {
+        command.args(["username", account]);
+    }
+    command.stdin(Stdio::piped());
+    let mut child = command.spawn().map_err(|error| error.to_string())?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin
+            .write_all(value.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&output))
+    }
+}
+
+fn linux_secret_tool_delete(service: &str, account: Option<&str>) -> Result<(), String> {
+    let Some(secret_tool) = linux_secret_tool_path() else {
+        return Err("secret-tool not installed".to_string());
+    };
+    let mut command = Command::new(secret_tool);
+    command.args(["clear", "service", service]);
+    if let Some(account) = account {
+        command.args(["username", account]);
+    }
+    let output = command.output().map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(command_error(&output))
+    }
+}
+
+fn command_error(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stderr
+        .lines()
+        .chain(stdout.lines())
+        .find_map(non_empty_trimmed)
+        .unwrap_or_else(|| format!("command exited with status {}", output.status))
+}
+
+fn redact_value(value: &str) -> String {
+    let chars: Vec<char> = value.chars().collect();
+    if chars.len() <= 12 {
+        return "[REDACTED]".to_string();
+    }
+    let first: String = chars.iter().take(4).collect();
+    let last: String = chars
+        .iter()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("{first}...{last}")
 }
 
 fn sqlite_query_impl(path: &str, sql: &str) -> Result<String, String> {

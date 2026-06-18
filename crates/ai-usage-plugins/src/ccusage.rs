@@ -5,7 +5,13 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-const CCUSAGE_VERSION: &str = "18.0.10";
+const CCUSAGE_VERSION: &str = "20.0.2";
+const CCUSAGE_PACKAGE_NAME: &str = "ccusage";
+const CCUSAGE_BIN_NAME: &str = "ccusage";
+const CCUSAGE_LEGACY_VERSION: &str = "18.0.11";
+const CCUSAGE_LEGACY_CLAUDE_PACKAGE_NAME: &str = "ccusage";
+const CCUSAGE_LEGACY_CODEX_PACKAGE_NAME: &str = "@ccusage/codex";
+const CCUSAGE_LEGACY_CODEX_BIN_NAME: &str = "ccusage-codex";
 const CCUSAGE_TIMEOUT_SECS: u64 = 30;
 const CCUSAGE_POLL_INTERVAL_MS: u64 = 100;
 
@@ -41,10 +47,15 @@ enum CcusageRunnerResult {
     TimedOut,
 }
 
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum CcusageCommandFlavor {
+    Current,
+    Legacy,
+}
+
 #[derive(Copy, Clone)]
 struct CcusageProviderConfig {
-    package_name: &'static str,
-    npm_exec_bin: &'static str,
+    command_namespace: &'static str,
     home_env_var: &'static str,
 }
 
@@ -112,21 +123,30 @@ pub fn query_daily(opts: &CcusageQueryOpts, plugin_id: &str) -> Result<JsonValue
 fn provider_config(provider: CcusageProvider) -> CcusageProviderConfig {
     match provider {
         CcusageProvider::Claude => CcusageProviderConfig {
-            package_name: "ccusage",
-            npm_exec_bin: "ccusage",
+            command_namespace: "claude",
             home_env_var: "CLAUDE_CONFIG_DIR",
         },
         CcusageProvider::Codex => CcusageProviderConfig {
-            package_name: "@ccusage/codex",
-            npm_exec_bin: "ccusage-codex",
+            command_namespace: "codex",
             home_env_var: "CODEX_HOME",
         },
     }
 }
 
-fn package_spec(provider: CcusageProvider) -> String {
-    let config = provider_config(provider);
-    format!("{}@{}", config.package_name, CCUSAGE_VERSION)
+fn supports_legacy_fallback(provider: CcusageProvider) -> bool {
+    matches!(provider, CcusageProvider::Claude | CcusageProvider::Codex)
+}
+
+fn package_spec() -> String {
+    format!("{}@{}", CCUSAGE_PACKAGE_NAME, CCUSAGE_VERSION)
+}
+
+fn legacy_package_spec(provider: CcusageProvider) -> String {
+    let package_name = match provider {
+        CcusageProvider::Claude => CCUSAGE_LEGACY_CLAUDE_PACKAGE_NAME,
+        CcusageProvider::Codex => CCUSAGE_LEGACY_CODEX_PACKAGE_NAME,
+    };
+    format!("{package_name}@{CCUSAGE_LEGACY_VERSION}")
 }
 
 fn runner_order() -> [CcusageRunnerKind; 5] {
@@ -263,7 +283,15 @@ fn collect_runners() -> Vec<(CcusageRunnerKind, String)> {
     runners
 }
 
-fn append_common_args(args: &mut Vec<String>, opts: &CcusageQueryOpts) {
+fn append_common_args(
+    args: &mut Vec<String>,
+    opts: &CcusageQueryOpts,
+    provider: CcusageProvider,
+    flavor: CcusageCommandFlavor,
+) {
+    if flavor == CcusageCommandFlavor::Current {
+        args.push(provider_config(provider).command_namespace.to_string());
+    }
     args.extend([
         "daily".to_string(),
         "--json".to_string(),
@@ -295,9 +323,17 @@ fn runner_args(
     kind: CcusageRunnerKind,
     opts: &CcusageQueryOpts,
     provider: CcusageProvider,
+    flavor: CcusageCommandFlavor,
 ) -> Vec<String> {
-    let config = provider_config(provider);
-    let package = package_spec(provider);
+    let package = match flavor {
+        CcusageCommandFlavor::Current => package_spec(),
+        CcusageCommandFlavor::Legacy => legacy_package_spec(provider),
+    };
+    let npm_exec_bin = match (flavor, provider) {
+        (CcusageCommandFlavor::Current, _)
+        | (CcusageCommandFlavor::Legacy, CcusageProvider::Claude) => CCUSAGE_BIN_NAME,
+        (CcusageCommandFlavor::Legacy, CcusageProvider::Codex) => CCUSAGE_LEGACY_CODEX_BIN_NAME,
+    };
     let mut args = match kind {
         CcusageRunnerKind::Bunx => vec!["--silent".to_string(), package],
         CcusageRunnerKind::PnpmDlx => vec!["-s".to_string(), "dlx".to_string(), package],
@@ -307,11 +343,11 @@ fn runner_args(
             "--yes".to_string(),
             format!("--package={package}"),
             "--".to_string(),
-            config.npm_exec_bin.to_string(),
+            npm_exec_bin.to_string(),
         ],
         CcusageRunnerKind::Npx => vec!["--yes".to_string(), package],
     };
-    append_common_args(&mut args, opts);
+    append_common_args(&mut args, opts, provider, flavor);
     args
 }
 
@@ -344,7 +380,24 @@ fn run_with_runner(
     opts: &CcusageQueryOpts,
     provider: CcusageProvider,
 ) -> CcusageRunnerResult {
-    let args = runner_args(kind, opts, provider);
+    let current =
+        run_with_runner_flavor(kind, program, opts, provider, CcusageCommandFlavor::Current);
+    match current {
+        CcusageRunnerResult::Failed if supports_legacy_fallback(provider) => {
+            run_with_runner_flavor(kind, program, opts, provider, CcusageCommandFlavor::Legacy)
+        }
+        other => other,
+    }
+}
+
+fn run_with_runner_flavor(
+    kind: CcusageRunnerKind,
+    program: &str,
+    opts: &CcusageQueryOpts,
+    provider: CcusageProvider,
+    flavor: CcusageCommandFlavor,
+) -> CcusageRunnerResult {
+    let args = runner_args(kind, opts, provider, flavor);
     let path = enriched_path();
     let mut command = Command::new(program);
     configure_command(&mut command, &args, path.as_deref());
@@ -453,4 +506,102 @@ fn normalize_output(stdout: &str) -> Option<String> {
         _ => return None,
     };
     serde_json::to_string(&normalized).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn current_runner_args_use_unified_package_with_provider_namespace() {
+        let opts = CcusageQueryOpts {
+            since: Some("20260101".to_string()),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            runner_args(
+                CcusageRunnerKind::Bunx,
+                &opts,
+                CcusageProvider::Claude,
+                CcusageCommandFlavor::Current
+            ),
+            vec![
+                "--silent",
+                "ccusage@20.0.2",
+                "claude",
+                "daily",
+                "--json",
+                "--order",
+                "desc",
+                "--since",
+                "20260101",
+            ]
+        );
+
+        assert_eq!(
+            runner_args(
+                CcusageRunnerKind::NpmExec,
+                &opts,
+                CcusageProvider::Codex,
+                CcusageCommandFlavor::Current
+            ),
+            vec![
+                "exec",
+                "--yes",
+                "--package=ccusage@20.0.2",
+                "--",
+                "ccusage",
+                "codex",
+                "daily",
+                "--json",
+                "--order",
+                "desc",
+                "--since",
+                "20260101",
+            ]
+        );
+    }
+
+    #[test]
+    fn legacy_runner_args_preserve_old_package_shapes() {
+        let opts = CcusageQueryOpts::default();
+
+        assert_eq!(
+            runner_args(
+                CcusageRunnerKind::Bunx,
+                &opts,
+                CcusageProvider::Claude,
+                CcusageCommandFlavor::Legacy
+            ),
+            vec![
+                "--silent",
+                "ccusage@18.0.11",
+                "daily",
+                "--json",
+                "--order",
+                "desc"
+            ]
+        );
+
+        assert_eq!(
+            runner_args(
+                CcusageRunnerKind::NpmExec,
+                &opts,
+                CcusageProvider::Codex,
+                CcusageCommandFlavor::Legacy
+            ),
+            vec![
+                "exec",
+                "--yes",
+                "--package=@ccusage/codex@18.0.11",
+                "--",
+                "ccusage-codex",
+                "daily",
+                "--json",
+                "--order",
+                "desc",
+            ]
+        );
+    }
 }

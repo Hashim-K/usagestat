@@ -61,13 +61,15 @@ impl ProviderManifest {
                 }
                 let resolved = canonical_string(resolved);
                 let color_path = sibling_icon_path(plugin_dir, "icon-color.svg");
-                let variants = icon_variants(resolved.clone(), color_path.clone());
+                let kind = icon_kind_for_path(&PathBuf::from(&resolved));
+                let raster = kind != "svg";
+                let variants = icon_variants(resolved.clone(), kind.clone(), color_path.clone());
                 Some(ProviderIcon {
-                    kind: "svg".to_string(),
+                    kind,
                     path: Some(resolved.clone()),
                     url: None,
-                    monochrome: self.icon_monochrome.unwrap_or(true),
-                    supports_current_color: self.icon_supports_current_color.unwrap_or(true),
+                    monochrome: self.icon_monochrome.unwrap_or(!raster),
+                    supports_current_color: self.icon_supports_current_color.unwrap_or(!raster),
                     monochrome_path: Some(resolved),
                     color_path,
                     variants: Some(variants),
@@ -100,16 +102,20 @@ impl ProviderManifest {
                 }
                 let resolved = canonical_string(resolved);
                 let color_path = sibling_icon_path(plugin_dir, "icon-color.svg");
-                let variants = icon_variants(resolved.clone(), color_path.clone());
+                let kind = icon
+                    .kind
+                    .unwrap_or_else(|| icon_kind_for_path(&PathBuf::from(&resolved)));
+                let raster = kind != "svg";
+                let variants = icon_variants(resolved.clone(), kind.clone(), color_path.clone());
                 Some(ProviderIcon {
-                    kind: icon.kind.unwrap_or_else(|| "svg".to_string()),
+                    kind,
                     path: Some(resolved.clone()),
                     url: None,
-                    monochrome: icon.monochrome.or(self.icon_monochrome).unwrap_or(true),
+                    monochrome: icon.monochrome.or(self.icon_monochrome).unwrap_or(!raster),
                     supports_current_color: icon
                         .supports_current_color
                         .or(self.icon_supports_current_color)
-                        .unwrap_or(true),
+                        .unwrap_or(!raster),
                     monochrome_path: Some(resolved),
                     color_path,
                     variants: Some(variants),
@@ -172,13 +178,33 @@ fn sibling_icon_path(plugin_dir: &Path, file_name: &str) -> Option<String> {
     path.is_file().then(|| canonical_string(path))
 }
 
-fn icon_variants(monochrome_path: String, color_path: Option<String>) -> ProviderIconVariants {
+fn icon_kind_for_path(path: &Path) -> String {
+    match path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => "png".to_string(),
+        "jpg" | "jpeg" => "jpeg".to_string(),
+        "webp" => "webp".to_string(),
+        _ => "svg".to_string(),
+    }
+}
+
+fn icon_variants(
+    monochrome_path: String,
+    monochrome_kind: String,
+    color_path: Option<String>,
+) -> ProviderIconVariants {
+    let monochrome_raster = monochrome_kind != "svg";
     ProviderIconVariants {
         monochrome: Some(ProviderIconVariant {
-            kind: "svg".to_string(),
+            kind: monochrome_kind,
             path: monochrome_path,
-            monochrome: true,
-            supports_current_color: true,
+            monochrome: !monochrome_raster,
+            supports_current_color: !monochrome_raster,
         }),
         color: color_path.map(|path| ProviderIconVariant {
             kind: "svg".to_string(),
