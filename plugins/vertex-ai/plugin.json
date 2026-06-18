@@ -12,6 +12,7 @@
   "supportedModes": ["oauth", "local"],
   "autoMode": "oauth",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Project", "scope": "detail" }
   ]
 }
