@@ -4,15 +4,16 @@
   "name": "Grok",
   "version": "0.0.1",
   "entry": "plugin.js",
-  "brandColor": "#111111",
+  "icon": "icon.svg",
+  "brandColor": "#000000",
   "links": [
-    { "label": "Grok", "url": "https://grok.com" },
-    { "label": "Status", "url": "https://status.x.ai" }
+    { "label": "Usage", "url": "https://grok.com/?_s=usage" }
   ],
-  "supportedModes": ["cli", "web", "local"],
+  "supportedModes": ["cli", "local"],
   "autoMode": "cli",
   "webUrl": "https://grok.com",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "Credits used", "scope": "overview", "primaryOrder": 1 },
+    { "type": "badge", "label": "Pay as you go", "scope": "detail" }
   ]
 }
