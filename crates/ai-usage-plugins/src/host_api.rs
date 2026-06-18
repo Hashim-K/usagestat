@@ -86,6 +86,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "LOCALAPPDATA",
     "MANUS_COOKIE",
     "MANUS_SESSION_TOKEN",
+    "MIMO_API_URL",
     "MIMO_COOKIE",
     "MISTRAL_COOKIE",
     "MOONSHOT_API_KEY",

@@ -12,6 +12,8 @@
   "autoMode": "web",
   "webUrl": "https://platform.xiaomimimo.com",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "Tokens", "scope": "overview", "primaryOrder": 1 },
+    { "type": "badge", "label": "Token plan", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Balance", "scope": "detail" }
   ]
 }
