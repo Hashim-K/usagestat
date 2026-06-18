@@ -12,6 +12,8 @@
   "autoMode": "web",
   "webUrl": "https://opencode.ai",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "5-hour", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Weekly", "scope": "detail" },
+    { "type": "text", "label": "Renews", "scope": "detail" }
   ]
 }
