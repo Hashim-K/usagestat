@@ -12,6 +12,7 @@
   "supportedModes": ["api"],
   "autoMode": "api",
   "lines": [
-    { "type": "text", "label": "Spend", "scope": "overview", "primaryOrder": 1 }
+    { "type": "text", "label": "Month spend", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Monthly budget", "scope": "overview", "primaryOrder": 2 }
   ]
 }

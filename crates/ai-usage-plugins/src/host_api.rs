@@ -1,9 +1,11 @@
 use crate::ccusage::{CcusageQueryOpts, query_status_json};
+use hmac::{Hmac, Mac};
 use rquickjs::{Ctx, Exception, Function, Object, function::Rest};
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
-use std::collections::HashMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -27,6 +29,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "AZURE_OPENAI_ENDPOINT",
     "AWS_ACCESS_KEY_ID",
     "AWS_DEFAULT_REGION",
+    "AWS_PROFILE",
     "AWS_REGION",
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
@@ -34,6 +37,8 @@ const ENV_ALLOWLIST: &[&str] = &[
     "CODEX_HOME",
     "CODEX_REFRESH_URL",
     "CODEX_USAGE_URL",
+    "CODEXBAR_BEDROCK_API_URL",
+    "CODEXBAR_BEDROCK_BUDGET",
     "CLAUDE_AI_SESSION_KEY",
     "CLAUDE_CONFIG_DIR",
     "CLAUDE_CODE_OAUTH_TOKEN",
@@ -98,6 +103,8 @@ const ENV_ALLOWLIST: &[&str] = &[
     "STEPFUN_OASIS_TOKEN",
     "T3_CHAT_COOKIE",
     "T3CHAT_COOKIE",
+    "USAGESTAT_BEDROCK_API_URL",
+    "USAGESTAT_BEDROCK_BUDGET",
     "VENICE_API_KEY",
     "VOLCENGINE_API_KEY",
     "WARP_API_KEY",
@@ -115,6 +122,12 @@ const FIRECTL_TIMEOUT_SECS: u64 = 15;
 const FIRECTL_POLL_INTERVAL_MS: u64 = 50;
 const COMMAND_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
 const COMMAND_POLL_INTERVAL_MS: u64 = 50;
+const AWS_COST_EXPLORER_REGION: &str = "us-east-1";
+const AWS_COST_EXPLORER_SERVICE: &str = "ce";
+const AWS_COST_EXPLORER_TARGET: &str = "AWSInsightsIndexService.GetCostAndUsage";
+const AWS_COST_EXPLORER_DEFAULT_URL: &str = "https://ce.us-east-1.amazonaws.com";
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -135,6 +148,32 @@ struct HttpRequest {
 struct HttpResponse {
     status: u16,
     headers: HashMap<String, String>,
+    body_text: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AwsCostExplorerRequest {
+    #[serde(default)]
+    access_key_id: String,
+    #[serde(default)]
+    secret_access_key: String,
+    #[serde(default)]
+    session_token: Option<String>,
+    #[serde(default)]
+    api_url: Option<String>,
+    start_date: String,
+    end_date: String,
+    #[serde(default = "default_cost_explorer_granularity")]
+    granularity: String,
+    #[serde(default)]
+    next_page_token: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AwsCostExplorerResponse {
+    status: u16,
     body_text: String,
 }
 
@@ -218,6 +257,7 @@ pub fn inject<'js>(
     inject_ls(ctx, &host)?;
     inject_http(ctx, &host)?;
     inject_command(ctx, &host)?;
+    inject_aws(ctx, &host)?;
     inject_sqlite(ctx, &host)?;
     inject_ccusage(ctx, &host, plugin_id)?;
     inject_usage_daily(ctx, &host, plugin_id)?;
@@ -276,6 +316,33 @@ fn inject_command<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<(
     )?;
 
     host.set("command", command_obj)?;
+    Ok(())
+}
+
+fn inject_aws<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let aws_obj = Object::new(ctx.clone())?;
+
+    aws_obj.set(
+        "_costExplorerRaw",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, req_json: String| -> rquickjs::Result<String> {
+                let request: AwsCostExplorerRequest =
+                    serde_json::from_str(&req_json).map_err(|error| {
+                        Exception::throw_message(
+                            &ctx_inner,
+                            &format!("invalid AWS Cost Explorer request: {error}"),
+                        )
+                    })?;
+                let response = execute_aws_cost_explorer_request(request)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error))?;
+                serde_json::to_string(&response)
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
+            },
+        )?,
+    )?;
+
+    host.set("aws", aws_obj)?;
     Ok(())
 }
 
@@ -1987,6 +2054,156 @@ fn rusqlite_value_to_json(v: rusqlite::types::Value) -> JsonValue {
     }
 }
 
+fn aws_sigv4_headers(
+    method: &str,
+    url: &str,
+    body: &[u8],
+    access_key_id: &str,
+    secret_access_key: &str,
+    session_token: Option<&str>,
+) -> Result<BTreeMap<String, String>, String> {
+    let parsed = reqwest::Url::parse(url).map_err(|error| format!("invalid AWS URL: {error}"))?;
+    let host = aws_host_header(&parsed)?;
+    let now = chrono::Utc::now();
+    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
+    let date_stamp = now.format("%Y%m%d").to_string();
+    let body_hash = sha256_hex(body);
+
+    let mut headers = BTreeMap::new();
+    headers.insert(
+        "content-type".to_string(),
+        "application/x-amz-json-1.1".to_string(),
+    );
+    headers.insert("host".to_string(), host);
+    headers.insert("x-amz-content-sha256".to_string(), body_hash.clone());
+    headers.insert("x-amz-date".to_string(), amz_date.clone());
+    if let Some(session_token) = session_token.and_then(non_empty_trimmed) {
+        headers.insert("x-amz-security-token".to_string(), session_token);
+    }
+    headers.insert(
+        "x-amz-target".to_string(),
+        AWS_COST_EXPLORER_TARGET.to_string(),
+    );
+
+    let signed_headers = headers.keys().cloned().collect::<Vec<_>>().join(";");
+    let canonical_headers = headers
+        .iter()
+        .map(|(name, value)| format!("{name}:{}\n", normalize_aws_header_value(value)))
+        .collect::<String>();
+    let path = if parsed.path().is_empty() {
+        "/"
+    } else {
+        parsed.path()
+    };
+    let canonical_request = [
+        method.to_ascii_uppercase(),
+        aws_uri_encode(path, false),
+        aws_canonical_query(&parsed),
+        canonical_headers,
+        signed_headers.clone(),
+        body_hash,
+    ]
+    .join("\n");
+
+    let credential_scope =
+        format!("{date_stamp}/{AWS_COST_EXPLORER_REGION}/{AWS_COST_EXPLORER_SERVICE}/aws4_request");
+    let string_to_sign = [
+        "AWS4-HMAC-SHA256".to_string(),
+        amz_date,
+        credential_scope.clone(),
+        sha256_hex(canonical_request.as_bytes()),
+    ]
+    .join("\n");
+    let signing_key = aws_signature_key(
+        secret_access_key,
+        &date_stamp,
+        AWS_COST_EXPLORER_REGION,
+        AWS_COST_EXPLORER_SERVICE,
+    )?;
+    let signature = hex_lower(&hmac_sha256(&signing_key, string_to_sign.as_bytes())?);
+    headers.insert(
+        "authorization".to_string(),
+        format!(
+            "AWS4-HMAC-SHA256 Credential={access_key_id}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+        ),
+    );
+    Ok(headers)
+}
+
+fn aws_host_header(url: &reqwest::Url) -> Result<String, String> {
+    let host = url
+        .host_str()
+        .ok_or_else(|| "AWS URL is missing a host".to_string())?;
+    match url.port() {
+        Some(port) if !(url.scheme() == "https" && port == 443) => Ok(format!("{host}:{port}")),
+        _ => Ok(host.to_string()),
+    }
+}
+
+fn aws_canonical_query(url: &reqwest::Url) -> String {
+    let mut pairs = url
+        .query_pairs()
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                aws_uri_encode(&key, true),
+                aws_uri_encode(&value, true)
+            )
+        })
+        .collect::<Vec<_>>();
+    pairs.sort();
+    pairs.join("&")
+}
+
+fn normalize_aws_header_value(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    hex_lower(&digest)
+}
+
+fn aws_signature_key(
+    secret_key: &str,
+    date_stamp: &str,
+    region: &str,
+    service: &str,
+) -> Result<Vec<u8>, String> {
+    let k_date = hmac_sha256(
+        format!("AWS4{secret_key}").as_bytes(),
+        date_stamp.as_bytes(),
+    )?;
+    let k_region = hmac_sha256(&k_date, region.as_bytes())?;
+    let k_service = hmac_sha256(&k_region, service.as_bytes())?;
+    hmac_sha256(&k_service, b"aws4_request")
+}
+
+fn hmac_sha256(key: &[u8], data: &[u8]) -> Result<Vec<u8>, String> {
+    let mut mac =
+        HmacSha256::new_from_slice(key).map_err(|error| format!("invalid HMAC key: {error}"))?;
+    mac.update(data);
+    Ok(mac.finalize().into_bytes().to_vec())
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn aws_uri_encode(value: &str, encode_slash: bool) -> String {
+    let mut encoded = String::new();
+    for byte in value.as_bytes() {
+        match *byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                encoded.push(*byte as char);
+            }
+            b'/' if !encode_slash => encoded.push('/'),
+            _ => encoded.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    encoded
+}
+
 fn execute_http_request(request: HttpRequest) -> Result<HttpResponse, reqwest::Error> {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
@@ -2022,6 +2239,81 @@ fn execute_http_request(request: HttpRequest) -> Result<HttpResponse, reqwest::E
         headers,
         body_text,
     })
+}
+
+fn execute_aws_cost_explorer_request(
+    request: AwsCostExplorerRequest,
+) -> Result<AwsCostExplorerResponse, String> {
+    let access_key_id = non_empty_trimmed(&request.access_key_id)
+        .ok_or_else(|| "AWS access key id is missing".to_string())?;
+    let secret_access_key = non_empty_trimmed(&request.secret_access_key)
+        .ok_or_else(|| "AWS secret access key is missing".to_string())?;
+    let session_token = request.session_token.as_deref().and_then(non_empty_trimmed);
+    let start_date = non_empty_trimmed(&request.start_date)
+        .ok_or_else(|| "Cost Explorer start date is missing".to_string())?;
+    let end_date = non_empty_trimmed(&request.end_date)
+        .ok_or_else(|| "Cost Explorer end date is missing".to_string())?;
+    let granularity = match request.granularity.trim().to_ascii_uppercase().as_str() {
+        "DAILY" => "DAILY",
+        "MONTHLY" => "MONTHLY",
+        _ => return Err("Cost Explorer granularity must be DAILY or MONTHLY".to_string()),
+    };
+    let url = request
+        .api_url
+        .as_deref()
+        .and_then(non_empty_trimmed)
+        .unwrap_or_else(|| AWS_COST_EXPLORER_DEFAULT_URL.to_string());
+    if !url.to_ascii_lowercase().starts_with("https://") {
+        return Err("AWS Cost Explorer URL must be HTTPS".to_string());
+    }
+
+    let mut body = serde_json::json!({
+        "TimePeriod": {
+            "Start": start_date,
+            "End": end_date,
+        },
+        "Granularity": granularity,
+        "Metrics": ["UnblendedCost"],
+        "GroupBy": [
+            { "Type": "DIMENSION", "Key": "SERVICE" }
+        ],
+    });
+    if let Some(next_page_token) = request
+        .next_page_token
+        .as_deref()
+        .and_then(non_empty_trimmed)
+    {
+        body["NextPageToken"] = JsonValue::String(next_page_token);
+    }
+    let body_text = serde_json::to_string(&body)
+        .map_err(|error| format!("invalid AWS request body: {error}"))?;
+
+    let headers = aws_sigv4_headers(
+        "POST",
+        &url,
+        body_text.as_bytes(),
+        &access_key_id,
+        &secret_access_key,
+        session_token.as_deref(),
+    )?;
+
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|error| error.to_string())?;
+    let mut builder = client.post(&url);
+    for (name, value) in headers {
+        builder = builder.header(name, value);
+    }
+    let response = builder
+        .body(body_text)
+        .send()
+        .map_err(|error| format!("AWS Cost Explorer request failed: {error}"))?;
+    let status = response.status().as_u16();
+    let body_text = response.text().map_err(|error| error.to_string())?;
+    Ok(AwsCostExplorerResponse { status, body_text })
 }
 
 fn execute_command_request(request: CommandRequest) -> Result<CommandResponse, String> {
@@ -2081,6 +2373,10 @@ fn default_command_timeout_ms() -> u64 {
     10_000
 }
 
+fn default_cost_explorer_granularity() -> String {
+    "MONTHLY".to_string()
+}
+
 fn redact_log_message(message: &str) -> String {
     let mut out = message.to_string();
     for marker in ["sk-", "pk-", "api_", "key_", "secret_"] {
@@ -2105,5 +2401,18 @@ mod tests {
         bytes.extend_from_slice(&[0xF0, 0x9F, 0x98]);
 
         assert_eq!(decode_capped_output(&bytes), "command ");
+    }
+
+    #[test]
+    fn aws_uri_encoding_preserves_path_slashes_only_when_requested() {
+        assert_eq!(aws_uri_encode("/cost explorer", false), "/cost%20explorer");
+        assert_eq!(aws_uri_encode("/cost explorer", true), "%2Fcost%20explorer");
+    }
+
+    #[test]
+    fn aws_host_header_includes_non_default_port() {
+        let url = reqwest::Url::parse("https://ce.example.test:8443").unwrap();
+
+        assert_eq!(aws_host_header(&url).unwrap(), "ce.example.test:8443");
     }
 }
