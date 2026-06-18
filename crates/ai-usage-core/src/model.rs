@@ -39,6 +39,8 @@ pub enum MetricLine {
         #[serde(rename = "periodDurationMs", skip_serializing_if = "Option::is_none")]
         period_duration_ms: Option<u64>,
         #[serde(skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         color: Option<String>,
     },
     Badge {

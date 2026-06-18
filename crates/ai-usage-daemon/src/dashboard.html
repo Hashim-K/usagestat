@@ -204,6 +204,7 @@ header{
 .mlabel{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu);margin-bottom:3px}
 .prog-row{display:flex;align-items:baseline;justify-content:space-between;margin-bottom:4px}
 .prog-val{font:12px var(--mono);color:var(--tx)}
+.metric-detail{font:11px var(--mono);color:var(--mu);margin:0 0 5px;word-break:break-word}
 .track{height:3px;background:var(--s2);border-radius:2px;overflow:hidden}
 .bar{height:100%;border-radius:2px;width:0;transition:width .85s cubic-bezier(.4,0,.2,1)}
 .resets{font:11px var(--mono);color:var(--mu);margin-top:3px}
@@ -271,6 +272,7 @@ header{
 .dmetric:last-child{margin-bottom:0}
 .dm-label{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu);margin-bottom:5px}
 .dm-val{font:13px var(--mono);color:var(--tx);margin-bottom:6px}
+.dm-detail{font:12px var(--mono);color:var(--mu);margin:0 0 6px;word-break:break-word}
 .dm-track{height:5px;background:var(--s2);border-radius:3px;overflow:hidden;margin-bottom:4px}
 .dm-bar{height:100%;border-radius:3px;width:0;transition:width .9s cubic-bezier(.4,0,.2,1)}
 .dm-row{display:flex;align-items:center;justify-content:space-between}
@@ -617,6 +619,7 @@ function renderOverview(){
         const p=pct(m),col=barCol(p);
         html+=`<div class="metric"><div class="mlabel">${esc(m.label)}</div>`;
         html+=`<div class="prog-row"><span class="prog-val">${fmtMetric(m)}</span></div>`;
+        if(m.detail) html+=`<div class="metric-detail">${esc(m.detail)}</div>`;
         html+=`<div class="track"><div class="bar" style="background:${col}" data-w="${p.toFixed(2)}%"></div></div>`;
         if(m.resetsAt) html+=`<div class="resets">${fmtReset(m.resetsAt)}</div>`;
         html+=`</div>`;
@@ -792,6 +795,7 @@ async function renderProvider(id){
       const p=pct(m),col=barCol(p);
       html+=`<div class="dmetric"><div class="dm-label">${esc(m.label)}</div>`;
       html+=`<div class="dm-row"><span class="dm-val">${fmtMetric(m)}</span><span class="dm-pct">${p.toFixed(1)}%</span></div>`;
+      if(m.detail) html+=`<div class="dm-detail">${esc(m.detail)}</div>`;
       html+=`<div class="dm-track"><div class="dm-bar" style="background:${col}" data-w="${p.toFixed(2)}%"></div></div>`;
       if(m.resetsAt) html+=`<div class="dm-reset">${fmtReset(m.resetsAt)}</div>`;
       html+=`</div>`;
@@ -973,7 +977,8 @@ function limitsTable(progress, text, badges, averageUsage, highest, nextReset, e
     html+=`<table class="metric-table"><thead><tr><th>Metric</th><th>Kind</th><th>Used</th><th>Limit</th><th>Percent</th><th>Reset</th></tr></thead><tbody>`;
     for(const m of progress){
       const p = m.limit>0 ? pct(m) : null;
-      html+=`<tr><td>${esc(m.label)}</td><td>${esc(m.format?.kind||'')}</td><td>${esc(formatScalar(m.used,m.format))}</td><td>${esc(formatScalar(m.limit,m.format))}</td><td>${p==null?'—':p.toFixed(1)+'%'}</td><td>${m.resetsAt?esc(fmtReset(m.resetsAt)):'—'}</td></tr>`;
+      const label = m.detail ? `${esc(m.label)}<div class="metric-detail" style="margin:4px 0 0">${esc(m.detail)}</div>` : esc(m.label);
+      html+=`<tr><td>${label}</td><td>${esc(m.format?.kind||'')}</td><td>${esc(formatScalar(m.used,m.format))}</td><td>${esc(formatScalar(m.limit,m.format))}</td><td>${p==null?'—':p.toFixed(1)+'%'}</td><td>${m.resetsAt?esc(fmtReset(m.resetsAt)):'—'}</td></tr>`;
     }
     html+=`</tbody></table>`;
   }
@@ -1251,6 +1256,7 @@ function normalizeProgress(progress, primaryPercent){
     suffix: p.suffix || null,
     resetsAt: p.resetsAt || p.resets_at || null,
     periodDurationMs: Number(p.periodDurationMs ?? p.period_duration_ms ?? 0) || null,
+    detail: p.detail || null,
     color: p.color || null,
   })) : [];
   if(!rows.length && primaryPercent != null){

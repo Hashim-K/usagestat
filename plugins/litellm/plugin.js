@@ -93,15 +93,27 @@
     return "$" + (Number(value) || 0).toFixed(2);
   }
 
-  function addBudget(lines, label, spend, budget, resetAt) {
+  function spendDetail(spend, budget, prefix) {
+    var value = budget != null && budget > 0 ? usd(spend) + " / " + usd(budget) : usd(spend);
+    return prefix ? prefix + ": " + value : value;
+  }
+
+  function spendLabel(label) {
+    return label.replace(/\s+budget$/i, " spend");
+  }
+
+  function addBudget(lines, label, spend, budget, resetAt, detailPrefix) {
     if (budget != null && budget > 0) {
       var line = ctxLineProgress(label, (spend / budget) * 100);
       if (resetAt) line.resetsAt = resetAt.toISOString();
+      line.detail = spendDetail(spend, budget, detailPrefix);
       lines.push(line);
-      lines.push({ type: "text", label: label + " Spend", value: usd(spend) + " / " + usd(budget) });
+      return true;
     } else if (spend > 0) {
-      lines.push({ type: "text", label: label + " Spend", value: usd(spend) });
+      lines.push({ type: "text", label: spendLabel(label), value: spendDetail(spend, null, detailPrefix) });
+      return true;
     }
+    return false;
   }
 
   function ctxLineProgress(label, percent) {
@@ -166,7 +178,7 @@
   function linesFor(snapshot) {
     var lines = [];
     addBudget(lines, "Personal budget", snapshot.personalSpendUSD, snapshot.personalBudgetUSD, snapshot.personalResetAt);
-    if (snapshot.team) addBudget(lines, "Team budget", snapshot.team.spendUSD, snapshot.team.budgetUSD, snapshot.team.resetAt);
+    if (snapshot.team) addBudget(lines, "Team budget", snapshot.team.spendUSD, snapshot.team.budgetUSD, snapshot.team.resetAt, snapshot.team.alias ? "Team " + snapshot.team.alias : "Team");
     if (!lines.length) lines.push({ type: "text", label: "Spend", value: usd(snapshot.personalSpendUSD || (snapshot.team && snapshot.team.spendUSD) || 0) });
     if (snapshot.keyName) lines.push({ type: "text", label: "Key", value: snapshot.keyName });
     if (snapshot.keyExpiresAt) lines.push({ type: "text", label: "Key Expires", value: snapshot.keyExpiresAt.toISOString().slice(0, 10) });

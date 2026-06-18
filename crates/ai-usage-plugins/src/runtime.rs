@@ -229,6 +229,7 @@ fn parse_metrics(result: &Object<'_>) -> Result<Vec<MetricLine>, String> {
                 format: parse_progress_format(&line),
                 resets_at: parse_optional_datetime(line.get::<_, String>("resetsAt").ok()),
                 period_duration_ms: line.get::<_, u64>("periodDurationMs").ok(),
+                detail: line.get::<_, String>("detail").ok(),
                 color,
             }),
             "barChart" => {

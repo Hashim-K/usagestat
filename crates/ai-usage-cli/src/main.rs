@@ -839,6 +839,7 @@ fn format_metric_value(line: &MetricLine) -> (String, String) {
             limit,
             format,
             resets_at,
+            detail,
             ..
         } => {
             let pct = if *limit > 0.0 {
@@ -851,6 +852,9 @@ fn format_metric_value(line: &MetricLine) -> (String, String) {
                 ProgressFormat::Dollars => format!("${used:.2} / ${limit:.2}"),
                 ProgressFormat::Count { suffix } => format!("{used:.0} / {limit:.0} {suffix}"),
             };
+            if let Some(detail) = detail {
+                v.push_str(&format!(" ({detail})"));
+            }
             if let Some(dt) = resets_at {
                 v.push_str(&format!("  {}", format_reset_text(dt)));
             }

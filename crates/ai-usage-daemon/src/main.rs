@@ -1027,6 +1027,7 @@ struct HistoryProgressRecord {
     suffix: Option<String>,
     resets_at: Option<String>,
     period_duration_ms: Option<u64>,
+    detail: Option<String>,
     color: Option<String>,
 }
 
@@ -1117,6 +1118,7 @@ fn progress_history(snapshot: &UsageSnapshot) -> Vec<HistoryProgressRecord> {
                 format,
                 resets_at,
                 period_duration_ms,
+                detail,
                 color,
             } => {
                 let (format_name, suffix) = match format {
@@ -1133,6 +1135,7 @@ fn progress_history(snapshot: &UsageSnapshot) -> Vec<HistoryProgressRecord> {
                     suffix,
                     resets_at: resets_at.map(|dt| dt.to_rfc3339()),
                     period_duration_ms: *period_duration_ms,
+                    detail: detail.clone(),
                     color: color.clone(),
                 })
             }

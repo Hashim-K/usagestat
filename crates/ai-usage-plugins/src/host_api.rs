@@ -727,6 +727,7 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     };
                     if (opts.resetsAt) line.resetsAt = opts.resetsAt;
                     if (opts.periodDurationMs) line.periodDurationMs = opts.periodDurationMs;
+                    if (opts.detail) line.detail = opts.detail;
                     if (opts.color) line.color = opts.color;
                     return line;
                 },
