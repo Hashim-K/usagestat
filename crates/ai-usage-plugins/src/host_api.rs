@@ -162,6 +162,13 @@ struct CommandResponse {
     stderr: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct KeychainPasswordItem {
+    account: String,
+    password: String,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct LsDiscoverRequest {
@@ -443,6 +450,56 @@ fn inject_keychain<'js>(
                     Exception::throw_message(
                         &ctx_inner,
                         &format!("keychain item not found: {error}"),
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    let pid_read_generic_item = plugin_id.to_string();
+    keychain_obj.set(
+        "readGenericPasswordItem",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, service: String| -> rquickjs::Result<String> {
+                log::info!(
+                    "[plugin:{pid_read_generic_item}] keychain generic item read: service={service}"
+                );
+                let item = platform_keychain_read_generic_item(&service).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item not found: {error}"),
+                    )
+                })?;
+                serde_json::to_string(&item).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item serialization failed: {error}"),
+                    )
+                })
+            },
+        )?,
+    )?;
+
+    let pid_read_internet = plugin_id.to_string();
+    keychain_obj.set(
+        "readInternetPassword",
+        Function::new(
+            ctx.clone(),
+            move |ctx_inner: Ctx<'_>, server: String| -> rquickjs::Result<String> {
+                log::info!(
+                    "[plugin:{pid_read_internet}] keychain internet password read: server={server}"
+                );
+                let item = platform_keychain_read_internet_password(&server).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item not found: {error}"),
+                    )
+                })?;
+                serde_json::to_string(&item).map_err(|error| {
+                    Exception::throw_message(
+                        &ctx_inner,
+                        &format!("keychain item serialization failed: {error}"),
                     )
                 })
             },
@@ -1554,6 +1611,22 @@ fn platform_keychain_read(service: &str, account: Option<&str>) -> Result<String
     }
 }
 
+fn platform_keychain_read_generic_item(service: &str) -> Result<KeychainPasswordItem, String> {
+    if cfg!(target_os = "macos") {
+        macos_keychain_read_generic_item(service)
+    } else {
+        Err("keychain item account lookup is not supported on this platform".to_string())
+    }
+}
+
+fn platform_keychain_read_internet_password(server: &str) -> Result<KeychainPasswordItem, String> {
+    if cfg!(target_os = "macos") {
+        macos_keychain_read_internet_password(server)
+    } else {
+        Err("internet password keychain access is not supported on this platform".to_string())
+    }
+}
+
 fn platform_keychain_write(
     service: &str,
     account: Option<&str>,
@@ -1591,6 +1664,52 @@ fn macos_keychain_read(service: &str, account: Option<&str>) -> Result<String, S
     }
     non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
         .ok_or_else(|| "empty keychain item".to_string())
+}
+
+fn macos_keychain_read_generic_item(service: &str) -> Result<KeychainPasswordItem, String> {
+    let mut inspect = Command::new("security");
+    inspect.args(["find-generic-password", "-s", service]);
+    let inspect_output = inspect.output().map_err(|error| error.to_string())?;
+    if !inspect_output.status.success() {
+        return Err(command_error(&inspect_output));
+    }
+    let inspect_text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&inspect_output.stdout),
+        String::from_utf8_lossy(&inspect_output.stderr)
+    );
+    let account = parse_macos_security_attribute(&inspect_text, "acct")
+        .ok_or_else(|| "keychain item has no account attribute".to_string())?;
+    let password = macos_keychain_read(service, Some(&account))?;
+    Ok(KeychainPasswordItem { account, password })
+}
+
+fn macos_keychain_read_internet_password(server: &str) -> Result<KeychainPasswordItem, String> {
+    let mut inspect = Command::new("security");
+    inspect.args(["find-internet-password", "-s", server]);
+    let inspect_output = inspect.output().map_err(|error| error.to_string())?;
+    if !inspect_output.status.success() {
+        return Err(command_error(&inspect_output));
+    }
+    let inspect_text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&inspect_output.stdout),
+        String::from_utf8_lossy(&inspect_output.stderr)
+    );
+    let account = parse_macos_security_attribute(&inspect_text, "acct")
+        .ok_or_else(|| "keychain item has no account attribute".to_string())?;
+
+    let mut password_command = Command::new("security");
+    password_command.args(["find-internet-password", "-s", server, "-a", &account, "-w"]);
+    let password_output = password_command
+        .output()
+        .map_err(|error| error.to_string())?;
+    if !password_output.status.success() {
+        return Err(command_error(&password_output));
+    }
+    let password = non_empty_trimmed(&String::from_utf8_lossy(&password_output.stdout))
+        .ok_or_else(|| "empty keychain item".to_string())?;
+    Ok(KeychainPasswordItem { account, password })
 }
 
 fn macos_keychain_write(service: &str, account: Option<&str>, value: &str) -> Result<(), String> {
@@ -1694,6 +1813,30 @@ fn linux_secret_tool_delete(service: &str, account: Option<&str>) -> Result<(), 
     } else {
         Err(command_error(&output))
     }
+}
+
+fn parse_macos_security_attribute(output: &str, attr: &str) -> Option<String> {
+    let quoted = format!("\"{attr}\"");
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if !trimmed.contains(&quoted) {
+            continue;
+        }
+        let Some(eq_index) = trimmed.find('=') else {
+            continue;
+        };
+        let raw = trimmed[eq_index + 1..].trim();
+        if raw == "<NULL>" {
+            return None;
+        }
+        if raw.len() >= 2 && raw.starts_with('"') && raw.ends_with('"') {
+            return Some(raw[1..raw.len() - 1].to_string());
+        }
+        if !raw.is_empty() {
+            return Some(raw.to_string());
+        }
+    }
+    None
 }
 
 fn command_error(output: &std::process::Output) -> String {
