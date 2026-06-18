@@ -34,6 +34,10 @@ pub fn cache_file() -> PathBuf {
     data_dir().join("snapshots.json")
 }
 
+pub fn usage_daily_file() -> PathBuf {
+    data_dir().join("usage_daily.json")
+}
+
 pub fn default_plugin_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
 

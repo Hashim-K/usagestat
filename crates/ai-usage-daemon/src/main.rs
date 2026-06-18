@@ -1,6 +1,6 @@
 use usagestat_core::{
     AppConfig, LoadedProvider, MetricLine, NormalizedMetrics, ProgressFormat, ProviderSummary,
-    UsageCache, UsageSnapshot, paths,
+    UsageCache, UsageSnapshot, paths, usage_daily,
 };
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
@@ -265,15 +265,15 @@ fn response_json(status: u16, reason: &str, body: &str) -> String {
 }
 
 fn serve_cost(provider_id: &str) -> String {
+    if let Some(response) = saved_cost_response(provider_id) {
+        return response;
+    }
+
     let canonical = match provider_id {
         "claude" | "anthropic" => "claude",
         "codex" | "openai" | "chatgpt" => "codex",
         _ => {
-            return response_json(
-                200,
-                "OK",
-                r#"{"error":{"code":"UNSUPPORTED","message":"Cost data not available for this provider"}}"#,
-            );
+            return serve_saved_cost(provider_id);
         }
     };
     match scan_local_usage(canonical) {
@@ -300,11 +300,7 @@ fn serve_cost(provider_id: &str) -> String {
             .unwrap_or_else(|_| "{}".into());
             response_json(200, "OK", &body)
         }
-        Err(_) => response_json(
-            200,
-            "OK",
-            r#"{"error":{"code":"UNSUPPORTED","message":"Cost data not available for this provider"}}"#,
-        ),
+        Err(_) => serve_saved_cost(provider_id),
     }
 }
 
@@ -315,15 +311,17 @@ fn serve_local_usage_report(rest: &str) -> String {
     if parts.next().is_some() {
         return response_json(404, "Not Found", r#"{"error":"not_found"}"#);
     }
+    if matches!(report, "daily" | "weekly" | "monthly") {
+        if let Some(response) = saved_usage_report_response(provider_id, report) {
+            return response;
+        }
+    }
+
     let provider = match provider_id {
         "claude" | "anthropic" => "claude",
         "codex" | "openai" | "chatgpt" => "codex",
         _ => {
-            return response_json(
-                200,
-                "OK",
-                r#"{"error":{"code":"UNSUPPORTED","message":"Local usage reports are not available for this provider"}}"#,
-            );
+            return serve_saved_usage_report(provider_id, report);
         }
     };
     if !matches!(
@@ -341,11 +339,73 @@ fn serve_local_usage_report(rest: &str) -> String {
         Ok(body) => response_json(200, "OK", &body),
         Err(e) => {
             log::warn!("local usage report failed: {e}");
-            response_json(
-                200,
-                "OK",
-                r#"{"error":{"code":"UNAVAILABLE","message":"Local usage report unavailable"}}"#,
-            )
+            serve_saved_usage_report(provider_id, report)
+        }
+    }
+}
+
+fn serve_saved_usage_report(provider_id: &str, report: &str) -> String {
+    saved_usage_report_response(provider_id, report).unwrap_or_else(|| {
+        response_json(
+            200,
+            "OK",
+            r#"{"error":{"code":"UNAVAILABLE","message":"Saved daily usage is not available for this provider"}}"#,
+        )
+    })
+}
+
+fn saved_usage_report_response(provider_id: &str, report: &str) -> Option<String> {
+    match usage_daily::report_json(provider_id, report) {
+        Ok(value) => {
+            if value.get("error").is_some() {
+                return None;
+            }
+            let body = serde_json::to_string_pretty(&value).unwrap_or_else(|_| "{}".into());
+            Some(response_json(200, "OK", &body))
+        }
+        Err(e) => {
+            log::warn!("saved daily usage report failed: {e}");
+            None
+        }
+    }
+}
+
+fn serve_saved_cost(provider_id: &str) -> String {
+    saved_cost_response(provider_id).unwrap_or_else(|| {
+        response_json(
+            200,
+            "OK",
+            r#"{"error":{"code":"UNSUPPORTED","message":"Cost data not available for this provider"}}"#,
+        )
+    })
+}
+
+fn saved_cost_response(provider_id: &str) -> Option<String> {
+    match usage_daily::selected_daily_rows(provider_id) {
+        Ok(rows) if !rows.is_empty() => {
+            let totals = rows.iter().fold(ModelAggregate::default(), |mut acc, row| {
+                acc.input_tokens += row.input_tokens;
+                acc.output_tokens += row.output_tokens;
+                acc.cache_read_tokens += row.cache_read_tokens;
+                acc.cache_creation_tokens += row.cache_creation_tokens;
+                acc.reasoning_output_tokens += row.reasoning_output_tokens;
+                acc.total_tokens += row.total_tokens;
+                acc.cost_usd += row.cost_usd;
+                acc
+            });
+            let body = serde_json::to_string_pretty(&json!({
+                "provider": provider_id,
+                "currency": "USD",
+                "daily": rows,
+                "totals": totals,
+            }))
+            .unwrap_or_else(|_| "{}".into());
+            Some(response_json(200, "OK", &body))
+        }
+        Ok(_) => None,
+        Err(e) => {
+            log::warn!("saved daily cost report failed: {e}");
+            None
         }
     }
 }
