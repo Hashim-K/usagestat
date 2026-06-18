@@ -1053,6 +1053,20 @@
     }
   }
 
+  function oauthPlanLabel(ctx, creds) {
+    if (!creds || !creds.oauth || !creds.oauth.subscriptionType) return null
+    const basePlan = ctx.fmt.planLabel(creds.oauth.subscriptionType)
+    if (!basePlan) return null
+
+    let tierSuffix = ""
+    const rlt = String(creds.oauth.rateLimitTier || "")
+    const tierMatch = rlt.match(/(\d+)x/)
+    if (tierMatch) {
+      tierSuffix = " " + tierMatch[1] + "x"
+    }
+    return basePlan + tierSuffix
+  }
+
   // ── probe() ────────────────────────────────────────────────────────────────
 
   function probe(ctx) {
@@ -1062,6 +1076,7 @@
     const sourceMode = String(ctx.sourceMode || "auto").toLowerCase()
     const wantsWeb = sourceMode === "web"
     const wantsOAuth = sourceMode === "oauth"
+    const wantsLocal = sourceMode === "local"
 
     if (wantsWeb && !sessionKey) {
       ctx.host.log.error("web mode requested but no session key found")
@@ -1071,7 +1086,7 @@
       ctx.host.log.error("oauth mode requested but no OAuth credentials found")
       throw "Not logged in. Run `claude` to authenticate."
     }
-    if (!hasOAuth && !sessionKey) {
+    if (!wantsLocal && !hasOAuth && !sessionKey) {
       ctx.host.log.error("probe failed: no credentials or session key")
       throw "Not logged in. Run `claude` to authenticate, or set CLAUDE_AI_SESSION_KEY."
     }
@@ -1084,23 +1099,16 @@
     let rateLimited = false
     let retryAfterSeconds = null
 
-    if (hasOAuth && !wantsWeb) {
+    if (hasOAuth) {
+      plan = oauthPlanLabel(ctx, creds)
+    }
+
+    if (wantsLocal) {
+      ctx.host.log.info("local mode requested; skipping live usage fetch")
+    } else if (hasOAuth && !wantsWeb) {
       // ── OAuth mode ───────────────────────────────────────────────────────
       let accessToken = creds.oauth.accessToken
       const canFetchLiveUsage = hasProfileScope(creds)
-
-      if (creds.oauth.subscriptionType) {
-        const basePlan = ctx.fmt.planLabel(creds.oauth.subscriptionType)
-        if (basePlan) {
-          let tierSuffix = ""
-          const rlt = String(creds.oauth.rateLimitTier || "")
-          const tierMatch = rlt.match(/(\d+)x/)
-          if (tierMatch) {
-            tierSuffix = " " + tierMatch[1] + "x"
-          }
-          plan = basePlan + tierSuffix
-        }
-      }
 
       if (canFetchLiveUsage) {
         if (nowMs < rateLimitedUntilMs) {
