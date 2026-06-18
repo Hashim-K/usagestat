@@ -3,16 +3,18 @@
   "id": "droid",
   "name": "Droid",
   "version": "0.0.1",
-  "entry": "plugin.js",
-  "brandColor": "#8B5CF6",
+  "entry": "../factory/plugin.js",
+  "icon": "../factory/icon.svg",
+  "brandColor": "#020202",
   "links": [
     { "label": "Factory", "url": "https://app.factory.ai" },
     { "label": "Status", "url": "https://status.factory.ai" }
   ],
-  "supportedModes": ["web"],
-  "autoMode": "web",
+  "supportedModes": ["oauth", "local"],
+  "autoMode": "oauth",
   "webUrl": "https://app.factory.ai",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "Standard", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Premium", "scope": "detail" }
   ]
 }
