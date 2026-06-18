@@ -226,6 +226,20 @@ pub fn selected_daily_rows(provider_id: &str) -> Result<Vec<UsageDailyRow>, Usag
     Ok(by_day.into_values().collect())
 }
 
+pub fn all_selected_daily_rows() -> Result<Vec<UsageDailyRow>, UsageDailyError> {
+    let mut by_provider_day: BTreeMap<(String, String), UsageDailyRow> = BTreeMap::new();
+    for row in read_store(&paths::usage_daily_file())?.rows {
+        let key = (row.provider_id.to_ascii_lowercase(), row.date.clone());
+        match by_provider_day.get(&key) {
+            Some(existing) if !prefer_row(&row, existing) => {}
+            _ => {
+                by_provider_day.insert(key, row);
+            }
+        }
+    }
+    Ok(by_provider_day.into_values().collect())
+}
+
 fn read_store(path: &Path) -> Result<StoredUsageDaily, UsageDailyError> {
     if !path.exists() {
         return Ok(StoredUsageDaily::default());

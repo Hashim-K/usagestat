@@ -220,6 +220,26 @@ fn route(
         return response_json(200, "OK", &body);
     }
 
+    if path == "/v1/history/quota" {
+        let body =
+            serde_json::to_string_pretty(&read_history(None)).unwrap_or_else(|_| "[]".into());
+        return response_json(200, "OK", &body);
+    }
+
+    if let Some(provider_id) = path.strip_prefix("/v1/history/quota/") {
+        let body = serde_json::to_string_pretty(&read_history(Some(provider_id)))
+            .unwrap_or_else(|_| "[]".into());
+        return response_json(200, "OK", &body);
+    }
+
+    if path == "/v1/history/daily" {
+        return serve_all_saved_daily_history();
+    }
+
+    if let Some(provider_id) = path.strip_prefix("/v1/history/daily/") {
+        return serve_saved_usage_report(provider_id, "daily");
+    }
+
     if let Some(provider_id) = path.strip_prefix("/v1/cost/") {
         return serve_cost(provider_id);
     }
@@ -352,6 +372,24 @@ fn serve_saved_usage_report(provider_id: &str, report: &str) -> String {
             r#"{"error":{"code":"UNAVAILABLE","message":"Saved daily usage is not available for this provider"}}"#,
         )
     })
+}
+
+fn serve_all_saved_daily_history() -> String {
+    match usage_daily::all_selected_daily_rows() {
+        Ok(rows) => {
+            let body = serde_json::to_string_pretty(&json!({ "daily": rows }))
+                .unwrap_or_else(|_| "{}".into());
+            response_json(200, "OK", &body)
+        }
+        Err(e) => {
+            log::warn!("saved daily history failed: {e}");
+            response_json(
+                200,
+                "OK",
+                r#"{"error":{"code":"UNAVAILABLE","message":"Saved daily usage history unavailable"}}"#,
+            )
+        }
+    }
 }
 
 fn saved_usage_report_response(provider_id: &str, report: &str) -> Option<String> {

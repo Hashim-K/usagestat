@@ -137,6 +137,11 @@ header{
 .kpi{background:color-mix(in srgb,var(--s1) 76%,transparent);border:1px solid var(--bd);border-radius:7px;padding:11px 12px}
 .kpi-value{font:700 21px/1 var(--mono);color:var(--hi);margin-bottom:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .kpi-label{font:10px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu)}
+.alert-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+.alert-row{display:flex;align-items:flex-start;gap:9px;padding:9px 10px;background:color-mix(in srgb,var(--s1) 78%,transparent);border:1px solid var(--bd);border-left:3px solid var(--alert,var(--blue));border-radius:7px}
+.alert-mark{font:700 10px/1 var(--mono);color:var(--alert,var(--blue));text-transform:uppercase;min-width:42px;padding-top:2px}
+.alert-text{font:12px/1.35 var(--sans);color:var(--tx);min-width:0}
+.alert-sub{display:block;font:11px var(--mono);color:var(--mu);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pressure-list{display:flex;flex-direction:column;gap:9px}
 .pressure-row{display:grid;grid-template-columns:minmax(90px,1fr) 70px 1.8fr;gap:10px;align-items:center}
 .pressure-name{font:12px var(--mono);color:var(--tx);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -663,12 +668,50 @@ function renderOverviewSummary(){
   const avg = primaryRows.length ? primaryRows.reduce((acc,row)=>acc+row.percent,0)/primaryRows.length : null;
   const nearLimit = progressRows.filter(row=>row.percent>=80).length;
   const live = snaps.filter(s=>s.source!=='error').length;
+  const errorCount = snaps.length - live;
   const withPace = snaps.filter(s=>s.pace).length;
   const resets = progressRows
     .filter(row=>row.metric.resetsAt)
     .sort((a,b)=>new Date(a.metric.resetsAt)-new Date(b.metric.resetsAt));
   const nextReset = resets[0];
   const updated = snaps.map(s=>+new Date(s.fetchedAt||0)).filter(Boolean).sort((a,b)=>b-a)[0];
+  const riskyPace = snaps
+    .filter(s=>s.pace && (!s.pace.willLastToReset || /over$/.test(String(s.pace.stage||''))))
+    .sort((a,b)=>(b.pace?.deltaPercent||0)-(a.pace?.deltaPercent||0));
+  const alerts = [];
+  if(riskyPace.length){
+    const s = riskyPace[0], p = s.pace;
+    alerts.push({
+      level:'pace',
+      color:paceColor(p.stage),
+      text:`${s.displayName||s.providerId} is ${stageLbl(p.stage)}`,
+      sub:`${fmtDelta(p.deltaPercent)} - ETA ${fmtEta(p.etaSeconds,p.stage)}`
+    });
+  }
+  if(highest && highest.percent >= 80){
+    alerts.push({
+      level:highest.percent >= 95 ? 'limit' : 'watch',
+      color:barCol(highest.percent),
+      text:`${highest.snap.displayName||highest.snap.providerId} has the tightest quota`,
+      sub:`${highest.metric.label}: ${highest.percent.toFixed(1)}% used`
+    });
+  }
+  if(nextReset){
+    alerts.push({
+      level:'reset',
+      color:'#7289da',
+      text:`Next reset: ${nextReset.snap.displayName||nextReset.snap.providerId}`,
+      sub:`${nextReset.metric.label} ${fmtReset(nextReset.metric.resetsAt)}`
+    });
+  }
+  if(errorCount > 0){
+    alerts.push({
+      level:'auth',
+      color:'#d25050',
+      text:`${errorCount} provider${errorCount===1?'':'s'} need attention`,
+      sub:'Open the provider tab for setup or login details'
+    });
+  }
 
   let html = `<div class="overview-panel">`;
   html+=`<div class="overview-title">Provider Health</div>`;
@@ -678,7 +721,13 @@ function renderOverviewSummary(){
   html+=overviewKpi(highest ? `${highest.percent.toFixed(0)}%` : '-', 'highest');
   html+=overviewKpi(avg == null ? '-' : `${avg.toFixed(1)}%`, 'avg usage');
   html+=overviewKpi(String(nearLimit), 'near limit');
-  html+=`</div></div>`;
+  html+=`</div>`;
+  if(alerts.length){
+    html+=`<div class="alert-list">`;
+    for(const row of alerts.slice(0,4)) html+=overviewAlert(row);
+    html+=`</div>`;
+  }
+  html+=`</div>`;
 
   html+=`<div class="overview-panel">`;
   html+=`<div class="overview-title">Quota Pressure</div>`;
@@ -701,6 +750,9 @@ function renderOverviewSummary(){
 
 function overviewKpi(value,label){
   return `<div class="kpi"><div class="kpi-value">${esc(value)}</div><div class="kpi-label">${esc(label)}</div></div>`;
+}
+function overviewAlert(row){
+  return `<div class="alert-row" style="--alert:${esc(row.color||'#7289da')}"><div class="alert-mark">${esc(row.level||'info')}</div><div class="alert-text">${esc(row.text||'')}<span class="alert-sub">${esc(row.sub||'')}</span></div></div>`;
 }
 
 // ── provider detail ───────────────────────────────────────────────────────────
