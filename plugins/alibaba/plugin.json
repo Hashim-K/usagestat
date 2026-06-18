@@ -9,10 +9,12 @@
     { "label": "Console", "url": "https://bailian.console.aliyun.com" },
     { "label": "Status", "url": "https://status.aliyun.com" }
   ],
-  "supportedModes": ["web", "api"],
+  "supportedModes": ["web"],
   "autoMode": "web",
   "webUrl": "https://bailian.console.aliyun.com",
   "lines": [
-    { "type": "badge", "label": "Status", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "5-Hour", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Weekly", "scope": "detail" },
+    { "type": "progress", "label": "Monthly", "scope": "detail" }
   ]
 }
