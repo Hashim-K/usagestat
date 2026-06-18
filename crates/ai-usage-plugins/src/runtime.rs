@@ -169,6 +169,19 @@ fn inject_context(
         if let Some(workspace_id) = &provider_config.workspace_id {
             provider_obj.set("workspaceId", workspace_id.as_str())?;
         }
+        if !provider_config.settings.is_empty() {
+            let settings_obj = Object::new(ctx.clone())?;
+            for (key, value) in &provider_config.settings {
+                match value {
+                    toml::Value::String(value) => settings_obj.set(key.as_str(), value.as_str())?,
+                    toml::Value::Integer(value) => settings_obj.set(key.as_str(), *value)?,
+                    toml::Value::Float(value) => settings_obj.set(key.as_str(), *value)?,
+                    toml::Value::Boolean(value) => settings_obj.set(key.as_str(), *value)?,
+                    _ => {}
+                }
+            }
+            provider_obj.set("settings", settings_obj)?;
+        }
         probe_ctx.set("provider", provider_obj)?;
     }
     probe_ctx.set("app", app)?;

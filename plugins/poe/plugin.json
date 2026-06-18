@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "poe",
+  "name": "Poe",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "icon": "icon.svg",
+  "brandColor": "#5D5CDE",
+  "links": [
+    { "label": "API Keys", "url": "https://poe.com/api/keys" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "text", "label": "Balance", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Last 30 Days", "scope": "detail" },
+    { "type": "barChart", "label": "Point History", "scope": "detail" }
+  ]
+}

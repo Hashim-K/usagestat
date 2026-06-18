@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "litellm",
+  "name": "LiteLLM",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "icon": "icon.svg",
+  "brandColor": "#111827",
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "progress", "label": "Personal budget", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Team budget", "scope": "overview", "primaryOrder": 2 },
+    { "type": "text", "label": "Spend", "scope": "detail" }
+  ]
+}

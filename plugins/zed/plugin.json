@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "zed",
+  "name": "Zed",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "icon": "icon.svg",
+  "brandColor": "#6D5EF8",
+  "links": [
+    { "label": "Account", "url": "https://zed.dev/account" },
+    { "label": "Status", "url": "https://status.zed.dev" }
+  ],
+  "supportedModes": ["api", "local"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "progress", "label": "Edit predictions", "scope": "overview", "primaryOrder": 1 },
+    { "type": "badge", "label": "Invoices", "scope": "detail" }
+  ]
+}

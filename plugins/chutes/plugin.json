@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "chutes",
+  "name": "Chutes",
+  "version": "0.0.1",
+  "entry": "plugin.js",
+  "icon": "icon.svg",
+  "brandColor": "#67E8F9",
+  "links": [
+    { "label": "Dashboard", "url": "https://chutes.ai" },
+    { "label": "Docs", "url": "https://chutes.ai/docs/getting-started/authentication" }
+  ],
+  "supportedModes": ["api"],
+  "autoMode": "api",
+  "lines": [
+    { "type": "progress", "label": "4-hour quota", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Monthly quota", "scope": "overview", "primaryOrder": 2 }
+  ]
+}
