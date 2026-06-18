@@ -14,6 +14,9 @@
   // Rate-limit state persisted across probe() calls (module scope survives re-invocations).
   const MIN_USAGE_FETCH_INTERVAL_MS = 5 * 60 * 1000  // never poll more than once per 5 min
   const DEFAULT_RATE_LIMIT_BACKOFF_MS = 5 * 60 * 1000 // fallback when no Retry-After header
+  const LIVE_USAGE_CACHE_FILE = "live-usage-cache.json"
+  const LIVE_USAGE_CACHE_VERSION = 1
+  const LIVE_USAGE_CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000
   let rateLimitedUntilMs = 0  // epoch ms; 0 = not rate-limited
   let lastUsageFetchMs = 0    // epoch ms of the most-recent OAuth API attempt
   let cachedUsageData = null  // last successful OAuth API response body (parsed JSON)
@@ -150,6 +153,49 @@
     if (!value) return false
     const lower = value.toLowerCase()
     return lower !== "0" && lower !== "false" && lower !== "no" && lower !== "off"
+  }
+
+  function liveUsageCachePath(ctx) {
+    if (!ctx.app || typeof ctx.app.pluginDataDir !== "string" || !ctx.app.pluginDataDir.trim()) {
+      return null
+    }
+    return ctx.app.pluginDataDir + "/" + LIVE_USAGE_CACHE_FILE
+  }
+
+  function readLiveUsageCache(ctx) {
+    const path = liveUsageCachePath(ctx)
+    if (!path || !ctx.host.fs.exists(path)) return null
+    try {
+      const parsed = ctx.util.tryParseJson(ctx.host.fs.readText(path))
+      if (!parsed || typeof parsed !== "object") return null
+      return parsed
+    } catch {
+      return null
+    }
+  }
+
+  function writeLiveUsageCache(ctx, updates) {
+    const path = liveUsageCachePath(ctx)
+    if (!path) return
+    try {
+      const cache = readLiveUsageCache(ctx) || {}
+      for (const key in updates) {
+        cache[key] = updates[key]
+      }
+      cache.version = LIVE_USAGE_CACHE_VERSION
+      cache.updatedAtMs = Date.now()
+      ctx.host.fs.writeText(path, JSON.stringify(cache, null, 2))
+    } catch (e) {
+      ctx.host.log.warn("Claude live usage cache write failed: " + String(e))
+    }
+  }
+
+  function cachedLiveUsageData(cache, nowMs) {
+    if (!cache || !cache.usageData || typeof cache.usageData !== "object") return null
+    const fetchedAtMs = Number(cache.usageFetchedAtMs)
+    if (!Number.isFinite(fetchedAtMs) || fetchedAtMs <= 0) return null
+    if (nowMs - fetchedAtMs > LIVE_USAGE_CACHE_MAX_AGE_MS) return null
+    return cache.usageData
   }
 
   function getClaudeHomePath(ctx) {
@@ -811,12 +857,34 @@
 
   // ── Web mode helpers ───────────────────────────────────────────────────────
 
-  function getSessionKey(ctx) {
-    const v = readEnvText(ctx, "CLAUDE_AI_SESSION_KEY") || readEnvText(ctx, "CLAUDE_WEB_SESSION_KEY")
-    if (!v) return null
-    // Accept both bare key and "sessionKey=<value>" format
-    const bare = v.replace(/^sessionKey=/i, "").trim()
+  function extractSessionKey(value) {
+    if (!value) return null
+    const raw = String(value).trim()
+    if (!raw) return null
+    const cookieMatch = raw.match(/(?:^|;\s*)sessionKey=([^;]+)/i)
+    if (cookieMatch && cookieMatch[1]) return cookieMatch[1].trim() || null
+    const bare = raw.replace(/^sessionKey=/i, "").trim()
     return bare || null
+  }
+
+  function providerCookieHeader(ctx) {
+    if (ctx.provider && typeof ctx.provider.cookieHeader === "string") {
+      return ctx.provider.cookieHeader
+    }
+    return null
+  }
+
+  function getSessionKey(ctx) {
+    const candidates = [
+      readEnvText(ctx, "CLAUDE_AI_SESSION_KEY"),
+      readEnvText(ctx, "CLAUDE_WEB_SESSION_KEY"),
+      providerCookieHeader(ctx),
+    ]
+    for (let i = 0; i < candidates.length; i++) {
+      const key = extractSessionKey(candidates[i])
+      if (key) return key
+    }
+    return null
   }
 
   function buildWebHeaders(sessionKey) {
@@ -857,28 +925,51 @@
     if (!Array.isArray(orgs) || orgs.length === 0) {
       throw "No Claude organizations found in web response."
     }
-    const orgId = orgs[0].uuid
-    if (!orgId) throw "Organization UUID missing in web response."
+    let orgId = null
+    let usageData = null
+    let lastUsageStatus = null
+    for (let i = 0; i < orgs.length; i++) {
+      const candidateOrgId = orgs[i] && orgs[i].uuid
+      if (!candidateOrgId) continue
 
-    let usageResp
-    try {
-      usageResp = ctx.util.request({
-        method: "GET",
-        url: CLAUDE_WEB_BASE_URL + "/organizations/" + orgId + "/usage",
-        headers: headers,
-        timeoutMs: 10000,
-      })
-    } catch (e) {
-      ctx.host.log.error("web mode: usage request failed: " + String(e))
-      throw "Web usage request failed. Check your connection."
+      let usageResp
+      try {
+        usageResp = ctx.util.request({
+          method: "GET",
+          url: CLAUDE_WEB_BASE_URL + "/organizations/" + candidateOrgId + "/usage",
+          headers: headers,
+          timeoutMs: 10000,
+        })
+      } catch (e) {
+        ctx.host.log.error("web mode: usage request failed: " + String(e))
+        throw "Web usage request failed. Check your connection."
+      }
+
+      lastUsageStatus = usageResp.status
+      if (usageResp.status === 401 || usageResp.status === 403) {
+        ctx.host.log.info("web mode: usage unavailable for org " + candidateOrgId + " (HTTP " + usageResp.status + ")")
+        continue
+      }
+      if (usageResp.status < 200 || usageResp.status >= 300) {
+        throw "Web usage request failed (HTTP " + usageResp.status + "). Try again later."
+      }
+
+      const parsedUsageData = ctx.util.tryParseJson(usageResp.bodyText)
+      if (!parsedUsageData) throw "Web usage response invalid. Try again later."
+      orgId = candidateOrgId
+      usageData = parsedUsageData
+      break
     }
 
-    if (usageResp.status < 200 || usageResp.status >= 300) {
-      throw "Web usage request failed (HTTP " + usageResp.status + "). Try again later."
+    if (!usageData) {
+      if (lastUsageStatus === 401) {
+        throw "Web session invalid or expired. Set CLAUDE_AI_SESSION_KEY to your claude.ai sessionKey cookie."
+      }
+      if (lastUsageStatus === 403) {
+        throw "No Claude organization with usage access found for this web session."
+      }
+      throw "Organization UUID missing in web response."
     }
-
-    const usageData = ctx.util.tryParseJson(usageResp.bodyText)
-    if (!usageData) throw "Web usage response invalid. Try again later."
 
     let accountInfo = null
     try {
@@ -897,6 +988,34 @@
 
     ctx.host.log.info("web mode: usage fetched for org " + orgId)
     return { usageData: usageData, accountInfo: accountInfo }
+  }
+
+  function loadWebUsageData(ctx, sessionKey, nowMs) {
+    const liveCache = readLiveUsageCache(ctx)
+    const cachedLastWebUsageFetchMs = Number(liveCache && liveCache.lastWebUsageFetchMs) || 0
+    const effectiveLastWebUsageFetchMs = Math.max(lastWebUsageFetchMs, cachedLastWebUsageFetchMs)
+    if (nowMs - effectiveLastWebUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
+      lastWebUsageFetchMs = effectiveLastWebUsageFetchMs
+      ctx.host.log.info(
+        "web usage fetch skipped: last fetch was " +
+        Math.round((nowMs - effectiveLastWebUsageFetchMs) / 1000) + "s ago"
+      )
+      return { data: cachedWebUsageData || cachedLiveUsageData(liveCache, nowMs), plan: null }
+    }
+
+    lastWebUsageFetchMs = nowMs
+    const result = fetchWebUsage(ctx, sessionKey)
+    cachedWebUsageData = result.usageData
+    writeLiveUsageCache(ctx, {
+      usageData: result.usageData,
+      usageFetchedAtMs: nowMs,
+      lastWebUsageFetchMs: nowMs,
+    })
+    let plan = null
+    if (result.accountInfo && result.accountInfo.rate_limit_tier) {
+      plan = webTierToPlanLabel(result.accountInfo.rate_limit_tier)
+    }
+    return { data: result.usageData, plan: plan }
   }
 
   function webTierToPlanLabel(tier) {
@@ -1074,6 +1193,7 @@
     const sessionKey = getSessionKey(ctx)
     const hasOAuth = !!(creds && creds.oauth && creds.oauth.accessToken && creds.oauth.accessToken.trim())
     const sourceMode = String(ctx.sourceMode || "auto").toLowerCase()
+    const wantsAuto = sourceMode === "auto"
     const wantsWeb = sourceMode === "web"
     const wantsOAuth = sourceMode === "oauth"
     const wantsLocal = sourceMode === "local"
@@ -1092,6 +1212,7 @@
     }
 
     const nowMs = Date.now()
+    const liveCache = readLiveUsageCache(ctx)
     const homePath = getClaudeHomeOverride(ctx)
     let data = null
     let lines = []
@@ -1111,26 +1232,34 @@
       const canFetchLiveUsage = hasProfileScope(creds)
 
       if (canFetchLiveUsage) {
-        if (nowMs < rateLimitedUntilMs) {
+        const cachedData = cachedUsageData || cachedLiveUsageData(liveCache, nowMs)
+        const cachedRateLimitedUntilMs = Number(liveCache && liveCache.rateLimitedUntilMs) || 0
+        const effectiveRateLimitedUntilMs = Math.max(rateLimitedUntilMs, cachedRateLimitedUntilMs)
+
+        if (nowMs < effectiveRateLimitedUntilMs) {
           // Still within a rate-limit window from a previous probe call — skip the
           // API request entirely and surface the remaining wait time to the user.
           rateLimited = true
-          retryAfterSeconds = Math.ceil((rateLimitedUntilMs - nowMs) / 1000)
-          data = cachedUsageData
+          rateLimitedUntilMs = effectiveRateLimitedUntilMs
+          retryAfterSeconds = Math.ceil((effectiveRateLimitedUntilMs - nowMs) / 1000)
+          data = cachedData
           ctx.host.log.info("usage fetch skipped: rate-limited for " + retryAfterSeconds + "s more")
         } else {
           // Rate-limit window has expired (or was never set).  Check whether we were
           // previously rate-limited so we can bypass the min-interval guard: a short
           // Retry-After (< 5 min) must not be swallowed by the normal poll throttle.
-          const wasRateLimited = rateLimitedUntilMs > 0
+          const wasRateLimited = effectiveRateLimitedUntilMs > 0
           rateLimitedUntilMs = 0
 
-          if (!wasRateLimited && nowMs - lastUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
+          const cachedLastUsageFetchMs = Number(liveCache && liveCache.lastUsageFetchMs) || 0
+          const effectiveLastUsageFetchMs = Math.max(lastUsageFetchMs, cachedLastUsageFetchMs)
+          if (!wasRateLimited && nowMs - effectiveLastUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
             // Polled too recently in normal operation — reuse last cached response.
-            data = cachedUsageData
+            lastUsageFetchMs = effectiveLastUsageFetchMs
+            data = cachedData
             ctx.host.log.info(
               "usage fetch skipped: last fetch was " +
-              Math.round((nowMs - lastUsageFetchMs) / 1000) + "s ago (min interval " +
+              Math.round((nowMs - effectiveLastUsageFetchMs) / 1000) + "s ago (min interval " +
               MIN_USAGE_FETCH_INTERVAL_MS / 1000 + "s)"
             )
           } else {
@@ -1185,7 +1314,14 @@
                 ? retryAfterSeconds * 1000
                 : DEFAULT_RATE_LIMIT_BACKOFF_MS
               rateLimitedUntilMs = nowMs + backoffMs
-              data = cachedUsageData
+              data = cachedData
+              writeLiveUsageCache(ctx, {
+                rateLimitedUntilMs: rateLimitedUntilMs,
+                lastUsageFetchMs: nowMs,
+                usageData: data,
+                usageFetchedAtMs: Number(liveCache && liveCache.usageFetchedAtMs) || null,
+                lastRateLimitedAtMs: nowMs,
+              })
               ctx.host.log.warn(
                 "usage rate limited (429), backing off for " +
                 Math.round(backoffMs / 1000) + "s"
@@ -1201,6 +1337,13 @@
               }
               cachedUsageData = data
               rateLimitedUntilMs = 0
+              writeLiveUsageCache(ctx, {
+                rateLimitedUntilMs: 0,
+                lastUsageFetchMs: nowMs,
+                usageData: data,
+                usageFetchedAtMs: nowMs,
+                lastRateLimitedAtMs: null,
+              })
             }
           } // end fetch else-branch
         }
@@ -1209,20 +1352,27 @@
       }
     } else {
       // ── Web mode ─────────────────────────────────────────────────────────
-      if (nowMs - lastWebUsageFetchMs < MIN_USAGE_FETCH_INTERVAL_MS) {
-        data = cachedWebUsageData
-        ctx.host.log.info(
-          "web usage fetch skipped: last fetch was " +
-          Math.round((nowMs - lastWebUsageFetchMs) / 1000) + "s ago"
-        )
-      } else {
-        lastWebUsageFetchMs = nowMs
-        const result = fetchWebUsage(ctx, sessionKey)
-        data = result.usageData
-        cachedWebUsageData = data
-        if (result.accountInfo && result.accountInfo.rate_limit_tier) {
-          plan = webTierToPlanLabel(result.accountInfo.rate_limit_tier)
+      const webResult = loadWebUsageData(ctx, sessionKey, nowMs)
+      data = webResult.data
+      if (webResult.plan) {
+        plan = webResult.plan
+      }
+    }
+
+    if (rateLimited && wantsAuto && sessionKey) {
+      try {
+        ctx.host.log.info("OAuth usage rate limited; trying Claude web fallback")
+        const webResult = loadWebUsageData(ctx, sessionKey, nowMs)
+        if (webResult.data) {
+          data = webResult.data
+          rateLimited = false
+          retryAfterSeconds = null
+          if (webResult.plan) {
+            plan = webResult.plan
+          }
         }
+      } catch (e) {
+        ctx.host.log.warn("Claude web fallback failed after OAuth rate limit: " + String(e))
       }
     }
 
