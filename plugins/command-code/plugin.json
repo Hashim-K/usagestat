@@ -4,14 +4,17 @@
   "name": "Command Code",
   "version": "0.0.1",
   "entry": "plugin.js",
-  "brandColor": "#14B8A6",
+  "brandColor": "#000000",
   "links": [
-    { "label": "Dashboard", "url": "https://commandcode.ai" }
+    { "label": "Studio", "url": "https://commandcode.ai/studio" }
   ],
   "supportedModes": ["web"],
   "autoMode": "web",
   "webUrl": "https://commandcode.ai",
   "lines": [
-    { "type": "progress", "label": "Credits", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "Monthly credits", "scope": "overview", "primaryOrder": 1 },
+    { "type": "text", "label": "Total spent", "scope": "overview" },
+    { "type": "text", "label": "Tokens used", "scope": "detail" },
+    { "type": "text", "label": "Models", "scope": "detail" }
   ]
 }
