@@ -856,6 +856,33 @@ fn format_metric_value(line: &MetricLine) -> (String, String) {
             }
             (label.clone(), v)
         }
+        MetricLine::BarChart {
+            label,
+            points,
+            note,
+            ..
+        } => {
+            let latest = points.last();
+            let mut value = match latest {
+                Some(point) => {
+                    let value = point
+                        .value_label
+                        .clone()
+                        .unwrap_or_else(|| format!("{:.0}", point.value));
+                    format!(
+                        "{} points, latest {} on {}",
+                        points.len(),
+                        value,
+                        point.label
+                    )
+                }
+                None => "0 points".to_string(),
+            };
+            if let Some(note) = note {
+                value.push_str(&format!(" ({note})"));
+            }
+            (label.clone(), value)
+        }
     }
 }
 

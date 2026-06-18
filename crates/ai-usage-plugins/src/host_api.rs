@@ -41,6 +41,7 @@ const ENV_ALLOWLIST: &[&str] = &[
     "COMMANDCODE_COOKIE",
     "CROF_API_KEY",
     "CROFAI_API_KEY",
+    "CURSOR_AGENT_HOME",
     "CURSOR_HOME",
     "DEEPGRAM_API_KEY",
     "DEEPGRAM_PROJECT_ID",
@@ -203,11 +204,13 @@ pub fn inject<'js>(
     inject_command(ctx, &host)?;
     inject_sqlite(ctx, &host)?;
     inject_ccusage(ctx, &host, plugin_id)?;
+    inject_cursor_logs(ctx, &host)?;
     inject_fireworks(ctx, &host)?;
     probe_ctx.set("host", host)?;
     patch_http_wrapper(ctx)?;
     patch_ls_wrapper(ctx)?;
     patch_ccusage_wrapper(ctx)?;
+    patch_cursor_logs_wrapper(ctx)?;
     patch_fireworks_wrapper(ctx)?;
     inject_utils(ctx)?;
     Ok(())
@@ -658,6 +661,12 @@ fn inject_utils(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     if (opts.periodDurationMs) line.periodDurationMs = opts.periodDurationMs;
                     if (opts.color) line.color = opts.color;
                     return line;
+                },
+                barChart: function(opts) {
+                    var line = { type: "barChart", label: opts.label, points: opts.points || [] };
+                    if (opts.note) line.note = opts.note;
+                    if (opts.color) line.color = opts.color;
+                    return line;
                 }
             };
 
@@ -841,6 +850,41 @@ fn inject_ccusage<'js>(
     Ok(())
 }
 
+fn inject_cursor_logs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let cursor_logs_obj = Object::new(ctx.clone())?;
+
+    cursor_logs_obj.set(
+        "_queryRaw",
+        Function::new(
+            ctx.clone(),
+            move |_ctx_inner: Ctx<'_>, opts_json: String| -> rquickjs::Result<String> {
+                let since = serde_json::from_str::<JsonValue>(&opts_json)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("since")
+                            .and_then(|since| since.as_str())
+                            .map(str::to_string)
+                    })
+                    .unwrap_or_default();
+                let (status, daily) = crate::cursor_usage_logs::query_daily_since(&since);
+                let status = match status {
+                    crate::cursor_usage_logs::CursorLogsStatus::Ok => "ok",
+                    crate::cursor_usage_logs::CursorLogsStatus::NoData => "no_data",
+                };
+                Ok(serde_json::json!({
+                    "status": status,
+                    "data": { "daily": daily }
+                })
+                .to_string())
+            },
+        )?,
+    )?;
+
+    host.set("cursorLogs", cursor_logs_obj)?;
+    Ok(())
+}
+
 fn inject_fireworks<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     let fireworks_obj = Object::new(ctx.clone())?;
     fireworks_obj.set(
@@ -889,6 +933,28 @@ fn patch_ccusage_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
                     return { status: "runner_failed" };
                 };
             }
+        })();
+        "#
+        .as_bytes(),
+    )
+}
+
+fn patch_cursor_logs_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
+    ctx.eval::<(), _>(
+        r#"
+        (function() {
+            if (!__usagestat_ctx.host.cursorLogs || !__usagestat_ctx.host.cursorLogs._queryRaw) return;
+            var rawFn = __usagestat_ctx.host.cursorLogs._queryRaw;
+            __usagestat_ctx.host.cursorLogs.queryDaily = function(opts) {
+                var result = rawFn(JSON.stringify(opts || {}));
+                try {
+                    var parsed = JSON.parse(result);
+                    if (parsed && typeof parsed === "object" && typeof parsed.status === "string") {
+                        return parsed;
+                    }
+                } catch (_) {}
+                return { status: "no_data", data: { daily: [] } };
+            };
         })();
         "#
         .as_bytes(),

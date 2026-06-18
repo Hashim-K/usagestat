@@ -914,6 +914,8 @@ struct SnapshotRecord {
     text: Vec<HistoryTextRecord>,
     #[serde(default)]
     badges: Vec<HistoryBadgeRecord>,
+    #[serde(default)]
+    charts: Vec<HistoryBarChartRecord>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -948,11 +950,29 @@ struct HistoryBadgeRecord {
     subtitle: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryBarChartRecord {
+    label: String,
+    points: Vec<HistoryBarChartPoint>,
+    note: Option<String>,
+    color: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HistoryBarChartPoint {
+    label: String,
+    value: f64,
+    value_label: Option<String>,
+}
+
 fn history_record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
     let metrics = NormalizedMetrics::from_snapshot(snapshot);
     let progress = progress_history(snapshot);
     let text = text_history(snapshot);
     let badges = badge_history(snapshot);
+    let charts = bar_chart_history(snapshot);
     let token_breakdown = token_breakdown(snapshot, &metrics);
     SnapshotRecord {
         ts: snapshot.fetched_at.to_rfc3339(),
@@ -983,6 +1003,7 @@ fn history_record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
         progress,
         text,
         badges,
+        charts,
     }
 }
 
@@ -1064,6 +1085,34 @@ fn badge_history(snapshot: &UsageSnapshot) -> Vec<HistoryBadgeRecord> {
         .collect()
 }
 
+fn bar_chart_history(snapshot: &UsageSnapshot) -> Vec<HistoryBarChartRecord> {
+    snapshot
+        .metrics
+        .iter()
+        .filter_map(|metric| match metric {
+            MetricLine::BarChart {
+                label,
+                points,
+                note,
+                color,
+            } => Some(HistoryBarChartRecord {
+                label: label.clone(),
+                points: points
+                    .iter()
+                    .map(|point| HistoryBarChartPoint {
+                        label: point.label.clone(),
+                        value: point.value,
+                        value_label: point.value_label.clone(),
+                    })
+                    .collect(),
+                note: note.clone(),
+                color: color.clone(),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 #[derive(Default)]
 struct TokenBreakdown {
     input: Option<u64>,
@@ -1102,6 +1151,7 @@ fn token_breakdown(snapshot: &UsageSnapshot, metrics: &NormalizedMetrics) -> Tok
                     assign_token_u64(&mut out, label, value);
                 }
             }
+            MetricLine::BarChart { .. } => {}
         }
     }
 

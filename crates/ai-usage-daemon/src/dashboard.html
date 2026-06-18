@@ -210,6 +210,13 @@ header{
 .pill-blue {border-color:rgba(88,166,255,.5);color:var(--blue); background:rgba(88,166,255,.08)}
 .pill-yellow{border-color:rgba(227,179,65,.5);color:var(--yellow);background:rgba(227,179,65,.08)}
 .pill-orange{border-color:rgba(240,136,62,.5);color:var(--orange);background:rgba(240,136,62,.08)}
+.spark{margin-top:4px}
+.spark-head{display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px}
+.spark-title{font:11px var(--mono);text-transform:uppercase;letter-spacing:.08em;color:var(--mu)}
+.spark-readout{font:11px var(--mono);color:var(--tx);text-align:right}
+.spark-bars{display:flex;align-items:flex-end;gap:2px;height:42px;padding:6px 0 3px;border-bottom:1px solid var(--bd)}
+.spark-bar{flex:1;min-width:2px;max-width:12px;border-radius:2px 2px 0 0;background:var(--spark,var(--blue));opacity:.78}
+.spark-note{font:10px var(--mono);color:var(--mu);margin-top:4px}
 
 /* card pace */
 .card-pace{margin:10px 0 4px;padding:9px 11px;background:var(--s1);border:1px solid var(--bd);border-radius:7px}
@@ -612,6 +619,8 @@ function renderOverview(){
         html+=`<div class="metric"><div class="kv"><span class="mlabel" style="margin:0">${esc(m.label)}</span><span class="kv-val">${esc(m.value||'')}</span></div></div>`;
       } else if(m.type==='badge'){
         html+=`<div class="metric"><div class="kv"><span class="mlabel" style="margin:0">${esc(m.label)}</span><span class="${pillCls(m.color)}">${esc(m.text||'')}</span></div></div>`;
+      } else if(m.type==='barChart'){
+        html+=barChartMetricHtml(m,true);
       }
     }
     if(pace){
@@ -738,6 +747,8 @@ async function renderProvider(id){
       html+=`<div class="dmetric"><div class="kv"><span class="mlabel" style="margin:0">${esc(m.label)}</span><span class="kv-val">${esc(m.value||'')}</span></div></div>`;
     } else if(m.type==='badge'){
       html+=`<div class="dmetric"><div class="kv"><span class="mlabel" style="margin:0">${esc(m.label)}</span><span class="${pillCls(m.color)}">${esc(m.text||'')}</span></div></div>`;
+    } else if(m.type==='barChart'){
+      html+=barChartMetricHtml(m,false);
     }
   }
   html+=`<div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--bd)">`;
@@ -1161,7 +1172,21 @@ function normalizeHistory(raw){
     progress: normalizeProgress(r.progress, r.primaryPercent ?? r.primary_percent),
     text: Array.isArray(r.text) ? r.text : [],
     badges: Array.isArray(r.badges) ? r.badges : [],
+    charts: normalizeCharts(r.charts),
   })).filter(r=>r.ts && r.providerId);
+}
+
+function normalizeCharts(charts){
+  return (Array.isArray(charts)?charts:[]).map(c=>({
+    label: String(c.label||'History'),
+    note: c.note || null,
+    color: c.color || null,
+    points: (Array.isArray(c.points)?c.points:[]).map(p=>({
+      label: String(p.label||''),
+      value: Number(p.value||0),
+      valueLabel: p.valueLabel || p.value_label || null,
+    })).filter(p=>p.label && Number.isFinite(p.value) && p.value>=0),
+  })).filter(c=>c.points.length);
 }
 
 function normalizeProgress(progress, primaryPercent){
@@ -1758,6 +1783,32 @@ function fmtMetric(m){
   if(k==='percent'){const p=m.limit>0?m.used/m.limit*100:0;return`${p.toFixed(1)}%  (${fmtNum(m.used)} / ${fmtNum(m.limit)})`;}
   if(k==='dollars') return `$${m.used.toFixed(2)} / $${m.limit.toFixed(2)}`;
   return `${fmtNum(m.used)} / ${fmtNum(m.limit)} ${m.format?.suffix||''}`.trim();
+}
+function barChartMetricHtml(m, compact){
+  const points = (Array.isArray(m.points)?m.points:[])
+    .map(p=>({label:String(p.label||''),value:Number(p.value||0),valueLabel:p.valueLabel||p.value_label||null}))
+    .filter(p=>p.label && Number.isFinite(p.value) && p.value>=0);
+  const cls = compact ? 'metric' : 'dmetric';
+  if(!points.length) return '';
+  const max = Math.max(...points.map(p=>p.value), 1);
+  const latest = points[points.length-1];
+  const peak = points.reduce((a,p)=>p.value>a.value?p:a, points[0]);
+  const color = chartColor(m.color);
+  const bars = points.slice(-31).map(p=>{
+    const h = Math.max(3, Math.round((p.value/max)*100));
+    return `<div class="spark-bar" style="height:${h}%;--spark:${color}" title="${esc(p.label)}: ${esc(formatChartValue(p))}"></div>`;
+  }).join('');
+  const readout = compact ? formatChartValue(latest) : `${formatChartValue(latest)} latest · ${formatChartValue(peak)} peak`;
+  const note = m.note ? `<div class="spark-note">${esc(m.note)}</div>` : '';
+  return `<div class="${cls}"><div class="spark"><div class="spark-head"><span class="spark-title">${esc(m.label||'History')}</span><span class="spark-readout">${esc(readout)}</span></div><div class="spark-bars" aria-label="${esc(m.label||'History')}">${bars}</div>${note}</div></div>`;
+}
+function formatChartValue(point){
+  if(point?.valueLabel) return String(point.valueLabel);
+  return fmtTok(Math.round(Number(point?.value)||0));
+}
+function chartColor(c){
+  if(typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c.trim())) return c.trim();
+  return {'green':'#3fb950','red':'#f85149','blue':'#58a6ff','yellow':'#e3b341','orange':'#f0883e','teal':'#39c5cf'}[c] || '#58a6ff';
 }
 function fmtNum(n){return n>=10000?n.toLocaleString():String(+(n).toFixed(n%1?1:0))}
 function fmtTok(n){

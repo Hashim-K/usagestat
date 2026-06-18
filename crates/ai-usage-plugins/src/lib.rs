@@ -1,3 +1,4 @@
+mod cursor_usage_logs;
 mod host_api;
 mod loader;
 mod runtime;

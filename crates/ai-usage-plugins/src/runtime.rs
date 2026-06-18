@@ -2,8 +2,8 @@ use crate::host_api;
 use chrono::{DateTime, Utc};
 use rquickjs::{Array, Context, Ctx, Object, Runtime, Value};
 use usagestat_core::{
-    LoadedProvider, MetricLine, ProgressFormat, ProviderConfig, ProviderManifest, UsageSnapshot,
-    paths,
+    BarChartPoint, LoadedProvider, MetricLine, ProgressFormat, ProviderConfig, ProviderManifest,
+    UsageSnapshot, paths,
 };
 
 pub fn probe_provider(
@@ -69,9 +69,14 @@ fn run_in_context(
     let probe_ctx: Value = globals
         .get("__usagestat_ctx")
         .unwrap_or_else(|_| Value::new_undefined(ctx.clone()));
-    let result: Object = probe_fn
-        .call((probe_ctx,))
-        .map_err(|_| extract_error_string(&ctx))?;
+    let result: Object = probe_fn.call((probe_ctx,)).map_err(|error| {
+        let caught = extract_error_string(&ctx);
+        if caught == "The plugin failed." {
+            format!("{error:?}")
+        } else {
+            caught
+        }
+    })?;
 
     let display_name = result
         .get::<_, String>("displayName")
@@ -103,6 +108,17 @@ fn extract_error_string(ctx: &Ctx<'_>) -> String {
         if !trimmed.is_empty() {
             return trimmed.to_string();
         }
+    }
+    if let Some(value) = exc.as_object() {
+        let message = value.get::<_, String>("message").unwrap_or_default();
+        let trimmed = message.trim();
+        if !trimmed.is_empty() {
+            return trimmed.to_string();
+        }
+    }
+    let debug = format!("{exc:?}");
+    if !debug.trim().is_empty() {
+        return debug;
     }
     "The plugin failed.".to_string()
 }
@@ -202,7 +218,18 @@ fn parse_metrics(result: &Object<'_>) -> Result<Vec<MetricLine>, String> {
                 period_duration_ms: line.get::<_, u64>("periodDurationMs").ok(),
                 color,
             }),
-            _ => return Err(format!("unknown metric type at index {idx}: {line_type}")),
+            "barChart" => {
+                let (chart, errors) = parse_bar_chart_line(&line, idx, label, color);
+                for message in errors {
+                    out.push(metric_error(message));
+                }
+                if let Some(chart) = chart {
+                    out.push(chart);
+                }
+            }
+            _ => out.push(metric_error(format!(
+                "unknown metric type at index {idx}: {line_type}"
+            ))),
         }
     }
 
@@ -211,6 +238,116 @@ fn parse_metrics(result: &Object<'_>) -> Result<Vec<MetricLine>, String> {
     }
 
     Ok(out)
+}
+
+const MAX_BAR_CHART_POINTS: usize = 366;
+
+fn parse_bar_chart_line<'js>(
+    line: &Object<'js>,
+    idx: usize,
+    label: String,
+    color: Option<String>,
+) -> (Option<MetricLine>, Vec<String>) {
+    let mut errors = Vec::new();
+    let points_array: Array = match line.get("points") {
+        Ok(points) => points,
+        Err(_) => {
+            errors.push(format!("barChart line at index {idx} missing points"));
+            return (None, errors);
+        }
+    };
+
+    let total_points = points_array.len();
+    let scan_count = total_points.min(MAX_BAR_CHART_POINTS);
+    if total_points > MAX_BAR_CHART_POINTS {
+        log::warn!(
+            "barChart line at index {idx} has {total_points} points; capping at {MAX_BAR_CHART_POINTS}"
+        );
+    }
+
+    let mut points = Vec::new();
+    for point_idx in 0..scan_count {
+        let point: Object = match points_array.get(point_idx) {
+            Ok(point) => point,
+            Err(_) => {
+                errors.push(format!(
+                    "barChart line at index {idx} has invalid point at index {point_idx}"
+                ));
+                continue;
+            }
+        };
+
+        let point_label = point.get::<_, String>("label").unwrap_or_default();
+        let point_label = point_label.trim().to_string();
+        if point_label.is_empty() {
+            errors.push(format!(
+                "barChart line at index {idx} has empty point label at index {point_idx}"
+            ));
+            continue;
+        }
+
+        let value: Value = match point.get("value") {
+            Ok(value) => value,
+            Err(_) => {
+                errors.push(format!(
+                    "barChart line at index {idx} point {point_idx} missing value"
+                ));
+                continue;
+            }
+        };
+        let value = match value.as_number() {
+            Some(value) if value.is_finite() && value >= 0.0 => value,
+            _ => {
+                errors.push(format!(
+                    "barChart line at index {idx} point {point_idx} invalid value"
+                ));
+                continue;
+            }
+        };
+
+        let value_label = string_value(point.get::<_, Value>("valueLabel").ok());
+
+        points.push(BarChartPoint {
+            label: point_label,
+            value,
+            value_label,
+        });
+    }
+
+    if points.is_empty() {
+        errors.push(format!("barChart line at index {idx} has no valid points"));
+        return (None, errors);
+    }
+
+    (
+        Some(MetricLine::BarChart {
+            label,
+            points,
+            note: string_value(line.get::<_, Value>("note").ok()),
+            color,
+        }),
+        errors,
+    )
+}
+
+fn string_value(value: Option<Value<'_>>) -> Option<String> {
+    let value = value?;
+    if value.is_null() || value.is_undefined() {
+        return None;
+    }
+    let value = value.as_string()?;
+    let value = value.to_string().ok()?;
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+fn metric_error(message: impl Into<String>) -> MetricLine {
+    MetricLine::Badge {
+        label: "Error".to_string(),
+        text: message.into(),
+        color: Some("red".to_string()),
+        subtitle: None,
+    }
 }
 
 fn parse_progress_format(line: &Object<'_>) -> ProgressFormat {

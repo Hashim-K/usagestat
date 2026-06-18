@@ -15,7 +15,7 @@ fn label_and_value<'a>(line: &'a MetricLine) -> Option<(&'a str, &'a str)> {
     match line {
         MetricLine::Text { label, value, .. } => Some((label.as_str(), value.as_str())),
         MetricLine::Badge { label, text, .. } => Some((label.as_str(), text.as_str())),
-        MetricLine::Progress { .. } => None,
+        MetricLine::Progress { .. } | MetricLine::BarChart { .. } => None,
     }
 }
 

@@ -10,6 +10,15 @@ pub enum ProgressFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BarChartPoint {
+    pub label: String,
+    pub value: f64,
+    #[serde(rename = "valueLabel", skip_serializing_if = "Option::is_none")]
+    pub value_label: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum MetricLine {
     Text {
@@ -39,6 +48,15 @@ pub enum MetricLine {
         color: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         subtitle: Option<String>,
+    },
+    #[serde(rename = "barChart")]
+    BarChart {
+        label: String,
+        points: Vec<BarChartPoint>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        color: Option<String>,
     },
 }
 
