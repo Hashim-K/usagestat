@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::ffi::{OsStr, OsString};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -14,6 +15,7 @@ const CCUSAGE_LEGACY_CODEX_PACKAGE_NAME: &str = "@ccusage/codex";
 const CCUSAGE_LEGACY_CODEX_BIN_NAME: &str = "ccusage-codex";
 const CCUSAGE_TIMEOUT_SECS: u64 = 30;
 const CCUSAGE_POLL_INTERVAL_MS: u64 = 100;
+const CCUSAGE_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -412,17 +414,24 @@ fn run_with_runner_flavor(
         Ok(child) => child,
         Err(_) => return CcusageRunnerResult::Failed,
     };
+    let mut stdout_reader = child.stdout.take().map(|mut stdout| {
+        std::thread::spawn(move || read_stream_capped(&mut stdout, CCUSAGE_OUTPUT_LIMIT_BYTES))
+    });
+    let mut stderr_reader = child.stderr.take().map(|mut stderr| {
+        std::thread::spawn(move || read_stream_capped(&mut stderr, CCUSAGE_OUTPUT_LIMIT_BYTES))
+    });
 
     let start = Instant::now();
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
-                let output = child.wait_with_output();
-                let Ok(output) = output else {
-                    return CcusageRunnerResult::Failed;
-                };
+                let stdout = stdout_reader
+                    .take()
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
+                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
                 if status.success() {
-                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let stdout = decode_capped_output(&stdout);
                     return normalize_output(&stdout)
                         .map(CcusageRunnerResult::Success)
                         .unwrap_or(CcusageRunnerResult::Failed);
@@ -431,6 +440,8 @@ fn run_with_runner_flavor(
             }
             Ok(None) if start.elapsed() > Duration::from_secs(CCUSAGE_TIMEOUT_SECS) => {
                 terminate_child(&mut child);
+                let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
+                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
                 return CcusageRunnerResult::TimedOut;
             }
             Ok(None) => std::thread::sleep(Duration::from_millis(CCUSAGE_POLL_INTERVAL_MS)),
@@ -452,6 +463,34 @@ fn terminate_child(child: &mut std::process::Child) {
     }
     let _ = child.kill();
     let _ = child.wait();
+}
+
+fn read_stream_capped<R: Read>(reader: &mut R, limit: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(limit.min(8192));
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                if output.len() < limit {
+                    let remaining = limit - output.len();
+                    output.extend_from_slice(&buffer[..read.min(remaining)]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    output
+}
+
+fn decode_capped_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(error) if error.error_len().is_none() => {
+            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
+        }
+        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
+    }
 }
 
 fn expand_home(path: &str) -> String {
@@ -603,5 +642,13 @@ mod tests {
                 "desc",
             ]
         );
+    }
+
+    #[test]
+    fn capped_output_decode_drops_incomplete_trailing_utf8() {
+        let mut bytes = "usage ".as_bytes().to_vec();
+        bytes.extend_from_slice(&[0xE2, 0x82]);
+
+        assert_eq!(decode_capped_output(&bytes), "usage ");
     }
 }

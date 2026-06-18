@@ -4,7 +4,7 @@ use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use std::collections::HashMap;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
@@ -113,6 +113,8 @@ const ENV_ALLOWLIST: &[&str] = &[
 
 const FIRECTL_TIMEOUT_SECS: u64 = 15;
 const FIRECTL_POLL_INTERVAL_MS: u64 = 50;
+const COMMAND_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
+const COMMAND_POLL_INTERVAL_MS: u64 = 50;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1095,18 +1097,10 @@ fn run_fireworks_billing_export_timeout(
     };
 
     let mut stdout_reader = child.stdout.take().map(|mut stdout| {
-        std::thread::spawn(move || {
-            let mut output = Vec::new();
-            let _ = std::io::Read::read_to_end(&mut stdout, &mut output);
-            output
-        })
+        std::thread::spawn(move || read_stream_capped(&mut stdout, COMMAND_OUTPUT_LIMIT_BYTES))
     });
     let mut stderr_reader = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || {
-            let mut output = Vec::new();
-            let _ = std::io::Read::read_to_end(&mut stderr, &mut output);
-            output
-        })
+        std::thread::spawn(move || read_stream_capped(&mut stderr, COMMAND_OUTPUT_LIMIT_BYTES))
     });
 
     let start = Instant::now();
@@ -1840,6 +1834,82 @@ fn parse_macos_security_attribute(output: &str, attr: &str) -> Option<String> {
     None
 }
 
+fn run_command_with_capped_output(
+    command: &mut Command,
+    timeout: Duration,
+    poll_interval: Duration,
+    output_limit: usize,
+) -> Result<std::process::Output, String> {
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("command failed to start: {error}"))?;
+
+    let mut stdout_reader = child.stdout.take().map(move |mut stdout| {
+        std::thread::spawn(move || read_stream_capped(&mut stdout, output_limit))
+    });
+    let mut stderr_reader = child.stderr.take().map(move |mut stderr| {
+        std::thread::spawn(move || read_stream_capped(&mut stderr, output_limit))
+    });
+
+    let start = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let stdout = stdout_reader
+                    .take()
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
+                let stderr = stderr_reader
+                    .take()
+                    .and_then(|reader| reader.join().ok())
+                    .unwrap_or_default();
+                return Ok(std::process::Output {
+                    status,
+                    stdout,
+                    stderr,
+                });
+            }
+            Ok(None) if start.elapsed() > timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
+                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
+                return Err(format!("command timed out after {}ms", timeout.as_millis()));
+            }
+            Ok(None) => std::thread::sleep(poll_interval),
+            Err(error) => return Err(format!("command wait failed: {error}")),
+        }
+    }
+}
+
+fn read_stream_capped<R: Read>(reader: &mut R, limit: usize) -> Vec<u8> {
+    let mut output = Vec::with_capacity(limit.min(8192));
+    let mut buffer = [0_u8; 8192];
+    loop {
+        match reader.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(read) => {
+                if output.len() < limit {
+                    let remaining = limit - output.len();
+                    output.extend_from_slice(&buffer[..read.min(remaining)]);
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    output
+}
+
+fn decode_capped_output(bytes: &[u8]) -> String {
+    match std::str::from_utf8(bytes) {
+        Ok(text) => text.to_string(),
+        Err(error) if error.error_len().is_none() => {
+            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
+        }
+        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 fn command_error(output: &std::process::Output) -> String {
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -1962,15 +2032,22 @@ fn execute_command_request(request: CommandRequest) -> Result<CommandResponse, S
         return Err("command timeout exceeds 30000ms".to_string());
     }
 
-    let output = Command::new(&request.program)
+    let mut command = Command::new(&request.program);
+    command
         .args(&request.args)
-        .output()
-        .map_err(|error| format!("command failed to start: {error}"))?;
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = run_command_with_capped_output(
+        &mut command,
+        Duration::from_millis(request.timeout_ms),
+        Duration::from_millis(COMMAND_POLL_INTERVAL_MS),
+        COMMAND_OUTPUT_LIMIT_BYTES,
+    )?;
 
     Ok(CommandResponse {
         status: output.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        stdout: decode_capped_output(&output.stdout),
+        stderr: decode_capped_output(&output.stderr),
     })
 }
 
@@ -2016,4 +2093,17 @@ fn redact_log_message(message: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn capped_output_decode_drops_incomplete_trailing_utf8() {
+        let mut bytes = "command ".as_bytes().to_vec();
+        bytes.extend_from_slice(&[0xF0, 0x9F, 0x98]);
+
+        assert_eq!(decode_capped_output(&bytes), "command ");
+    }
 }
