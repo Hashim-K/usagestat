@@ -12,6 +12,7 @@
   "autoMode": "web",
   "webUrl": "https://platform.stepfun.com",
   "lines": [
-    { "type": "progress", "label": "Step Plan", "scope": "overview", "primaryOrder": 1 }
+    { "type": "progress", "label": "5h Step Plan", "scope": "overview", "primaryOrder": 1 },
+    { "type": "progress", "label": "Weekly Step Plan", "scope": "detail", "primaryOrder": 2 }
   ]
 }
