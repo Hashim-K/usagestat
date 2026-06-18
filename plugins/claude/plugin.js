@@ -4,6 +4,11 @@
   const KEYCHAIN_SERVICE_PREFIX = "Claude Code"
   const PROD_BASE_API_URL = "https://api.anthropic.com"
   const PROD_REFRESH_URL = "https://platform.claude.com/v1/oauth/token"
+  const ADMIN_COST_REPORT_URL = "https://api.anthropic.com/v1/organizations/cost_report"
+  const ADMIN_MESSAGES_USAGE_URL = "https://api.anthropic.com/v1/organizations/usage_report/messages"
+  const ANTHROPIC_VERSION = "2023-06-01"
+  const ADMIN_DAILY_BUCKETS = 31
+  const ADMIN_MAX_PAGES = 100
   const PROD_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
   const NON_PROD_CLIENT_ID = "22422756-60c9-4084-8eb7-27705fd5cf9a"
   const SCOPES =
@@ -153,6 +158,28 @@
     if (!value) return false
     const lower = value.toLowerCase()
     return lower !== "0" && lower !== "false" && lower !== "no" && lower !== "off"
+  }
+
+  function cleanText(value) {
+    if (value === null || value === undefined) return null
+    let text = String(value).trim()
+    if (!text) return null
+    if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+      text = text.slice(1, -1).trim()
+    }
+    return text || null
+  }
+
+  function readClaudeAdminApiKey(ctx) {
+    const configured = cleanText(ctx.provider && ctx.provider.apiKey)
+    if (configured) return configured
+
+    const envNames = ["ANTHROPIC_ADMIN_KEY", "ANTHROPIC_ADMIN_API_KEY"]
+    for (let i = 0; i < envNames.length; i++) {
+      const value = cleanText(readEnvText(ctx, envNames[i]))
+      if (value) return value
+    }
+    return null
   }
 
   function liveUsageCachePath(ctx) {
@@ -630,6 +657,256 @@
     return { status: "ok", data: result.data }
   }
 
+  function adminIsoString(ms) {
+    return new Date(ms).toISOString().replace(".000Z", "Z")
+  }
+
+  function adminRange(nowMs) {
+    const now = new Date(nowMs)
+    const todayStartMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    const startMs = todayStartMs - (ADMIN_DAILY_BUCKETS - 1) * 24 * 60 * 60 * 1000
+    const endMs = todayStartMs + 24 * 60 * 60 * 1000
+    return { startingAt: adminIsoString(startMs), endingAt: adminIsoString(endMs) }
+  }
+
+  function makeAdminUrl(baseUrl, params) {
+    const query = []
+    const keys = Object.keys(params)
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]
+      const value = params[key]
+      if (value === null || value === undefined || value === "") continue
+      query.push(encodeURIComponent(key) + "=" + encodeURIComponent(String(value)))
+    }
+    return baseUrl + (query.length ? "?" + query.join("&") : "")
+  }
+
+  function makeAdminError(message, status, endpoint) {
+    return {
+      message,
+      status,
+      endpoint,
+      authRejected: status === 401 || status === 403,
+    }
+  }
+
+  function requestClaudeAdminJson(ctx, url, apiKey, endpoint) {
+    let resp
+    try {
+      resp = ctx.util.request({
+        method: "GET",
+        url,
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+          Accept: "application/json",
+          "User-Agent": "UsageStat/1.0",
+        },
+        timeoutMs: 20000,
+      })
+    } catch (e) {
+      throw makeAdminError("Claude Admin API " + endpoint + " request failed: " + String(e), 0, endpoint)
+    }
+
+    if (ctx.util.isAuthStatus(resp.status)) {
+      throw makeAdminError("Claude Admin API key invalid or missing required permissions.", resp.status, endpoint)
+    }
+    if (resp.status < 200 || resp.status >= 300) {
+      throw makeAdminError("Claude Admin API " + endpoint + " failed (HTTP " + resp.status + ").", resp.status, endpoint)
+    }
+
+    const json = ctx.util.tryParseJson(resp.bodyText)
+    if (!json) throw makeAdminError("Claude Admin API " + endpoint + " response invalid.", resp.status, endpoint)
+    return json
+  }
+
+  function fetchClaudeAdminReport(ctx, apiKey, url, endpoint, groupBy) {
+    const range = adminRange(Date.now())
+    const buckets = []
+    let nextPage = null
+    const seenPages = {}
+    let pageCount = 0
+
+    do {
+      pageCount += 1
+      if (pageCount > ADMIN_MAX_PAGES) {
+        throw makeAdminError("Claude Admin API " + endpoint + " pagination exceeded " + ADMIN_MAX_PAGES + " pages.", 200, endpoint)
+      }
+
+      const params = {
+        starting_at: range.startingAt,
+        ending_at: range.endingAt,
+        bucket_width: "1d",
+        limit: ADMIN_DAILY_BUCKETS,
+        "group_by[]": groupBy,
+      }
+      if (nextPage) params.page = nextPage
+
+      const json = requestClaudeAdminJson(ctx, makeAdminUrl(url, params), apiKey, endpoint)
+      if (Array.isArray(json.data)) {
+        for (let i = 0; i < json.data.length; i++) buckets.push(json.data[i])
+      }
+
+      if (!json.has_more) {
+        nextPage = null
+        continue
+      }
+      nextPage = cleanText(json.next_page)
+      if (!nextPage) {
+        throw makeAdminError("Claude Admin API " + endpoint + " pagination cursor missing.", 200, endpoint)
+      }
+      if (seenPages[nextPage]) {
+        throw makeAdminError("Claude Admin API " + endpoint + " pagination cursor repeated.", 200, endpoint)
+      }
+      seenPages[nextPage] = true
+    } while (nextPage)
+
+    return buckets
+  }
+
+  function numberValue(value) {
+    if (typeof value === "number" && Number.isFinite(value)) return value
+    if (typeof value === "string" && value.trim()) {
+      const parsed = Number(value.trim().replace(/,/g, ""))
+      if (Number.isFinite(parsed)) return parsed
+    }
+    return null
+  }
+
+  function intValue(value) {
+    const n = numberValue(value)
+    return n === null ? 0 : Math.max(0, Math.floor(n))
+  }
+
+  function displayName(raw, fallback) {
+    return cleanText(raw) || fallback
+  }
+
+  function dayKeyFromAdminDate(rawDate) {
+    const ms = Date.parse(rawDate)
+    if (!Number.isFinite(ms)) return null
+    return new Date(ms).toISOString().slice(0, 10)
+  }
+
+  function adminDailyBucket(map, startingAt, endingAt) {
+    const dayKey = dayKeyFromAdminDate(startingAt)
+    if (!dayKey) return null
+    if (!map[dayKey]) {
+      map[dayKey] = {
+        date: dayKey,
+        startingAt,
+        endingAt,
+        costUSD: 0,
+        inputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+        costItems: {},
+        models: {},
+      }
+    }
+    return map[dayKey]
+  }
+
+  function addAdminModel(day, name, input, cacheCreation, cacheRead, output, total) {
+    if (!day.models[name]) {
+      day.models[name] = {
+        modelName: name,
+        inputTokens: 0,
+        cacheCreationTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        totalTokens: 0,
+      }
+    }
+    const model = day.models[name]
+    model.inputTokens += input
+    model.cacheCreationTokens += cacheCreation
+    model.cacheReadTokens += cacheRead
+    model.outputTokens += output
+    model.totalTokens += total
+  }
+
+  function cacheCreationTokenCount(cacheCreation) {
+    if (!cacheCreation || typeof cacheCreation !== "object") return 0
+    const total = intValue(cacheCreation.total_input_tokens)
+    if (total > 0) return total
+    return intValue(cacheCreation.ephemeral_1h_input_tokens) +
+      intValue(cacheCreation.ephemeral_5m_input_tokens)
+  }
+
+  function makeClaudeAdminDaily(costBuckets, messageBuckets) {
+    const map = {}
+
+    for (let i = 0; i < costBuckets.length; i++) {
+      const bucket = costBuckets[i] || {}
+      const day = adminDailyBucket(map, bucket.starting_at, bucket.ending_at)
+      if (!day) continue
+      const results = Array.isArray(bucket.results) ? bucket.results : []
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j] || {}
+        const amount = numberValue(result.amount)
+        const costUSD = amount === null ? 0 : amount / 100
+        day.costUSD += costUSD
+        const name = displayName(result.description || result.cost_type, "Claude API")
+        day.costItems[name] = (day.costItems[name] || 0) + costUSD
+      }
+    }
+
+    for (let i = 0; i < messageBuckets.length; i++) {
+      const bucket = messageBuckets[i] || {}
+      const day = adminDailyBucket(map, bucket.starting_at, bucket.ending_at)
+      if (!day) continue
+      const results = Array.isArray(bucket.results) ? bucket.results : []
+      for (let j = 0; j < results.length; j++) {
+        const result = results[j] || {}
+        const input = intValue(result.uncached_input_tokens)
+        const cacheCreation = cacheCreationTokenCount(result.cache_creation)
+        const cacheRead = intValue(result.cache_read_input_tokens)
+        const output = intValue(result.output_tokens)
+        const total = input + cacheCreation + cacheRead + output
+        day.inputTokens += input
+        day.cacheCreationTokens += cacheCreation
+        day.cacheReadTokens += cacheRead
+        day.outputTokens += output
+        day.totalTokens += total
+        addAdminModel(day, displayName(result.model, "Claude API"), input, cacheCreation, cacheRead, output, total)
+      }
+    }
+
+    return Object.keys(map)
+      .sort()
+      .map((key) => {
+        const day = map[key]
+        const modelBreakdowns = Object.keys(day.models)
+          .map((name) => day.models[name])
+          .sort((a, b) => b.totalTokens - a.totalTokens || a.modelName.localeCompare(b.modelName))
+        const costItems = Object.keys(day.costItems)
+          .map((name) => ({ name, costUSD: day.costItems[name] }))
+          .sort((a, b) => b.costUSD - a.costUSD || a.name.localeCompare(b.name))
+        return {
+          date: day.date,
+          inputTokens: day.inputTokens,
+          cacheCreationTokens: day.cacheCreationTokens,
+          cacheReadTokens: day.cacheReadTokens,
+          outputTokens: day.outputTokens,
+          totalTokens: day.totalTokens,
+          costUSD: day.costUSD,
+          totalCost: day.costUSD,
+          modelsUsed: modelBreakdowns.map((model) => model.modelName),
+          modelBreakdowns,
+          costItems,
+        }
+      })
+  }
+
+  function fetchClaudeAdminUsage(ctx, apiKey) {
+    const costs = fetchClaudeAdminReport(ctx, apiKey, ADMIN_COST_REPORT_URL, "cost_report", "description")
+    const messages = fetchClaudeAdminReport(ctx, apiKey, ADMIN_MESSAGES_USAGE_URL, "messages", "model")
+    return makeClaudeAdminDaily(costs, messages)
+  }
+
   function fmtTokens(n) {
     const abs = Math.abs(n)
     const sign = n < 0 ? "-" : ""
@@ -718,6 +995,10 @@
   }
 
   function collectUsageChartPoints(daily) {
+    const hasCost = daily.some((day) => {
+      const cost = usageCostUsd(day)
+      return cost !== null && cost > 0
+    })
     const points = []
     for (let i = 0; i < daily.length; i++) {
       const day = daily[i]
@@ -725,11 +1006,14 @@
       if (!Number.isFinite(tokens) || tokens < 0) continue
       const key = dayKeyFromUsageDate(day.date)
       if (!key) continue
+      const cost = usageCostUsd(day) || 0
       points.push({
         key: key,
         label: usageDayLabel(day.date),
-        value: tokens,
-        valueLabel: fmtTokens(tokens) + " tokens",
+        value: hasCost ? cost : tokens,
+        valueLabel: hasCost
+          ? "$" + cost.toFixed(2) + " · " + fmtTokens(tokens) + " tokens"
+          : fmtTokens(tokens) + " tokens",
       })
     }
     return points
@@ -742,32 +1026,37 @@
       }))
   }
 
-  function pushUsageChartLine(lines, ctx, daily) {
+  function pushUsageChartLine(lines, ctx, daily, note) {
     const points = collectUsageChartPoints(daily)
     if (points.length === 0) return
     lines.push(ctx.line.barChart({
       label: "Usage Trend",
       points: points,
-      note: "Estimated from local Claude logs at API rates.",
+      note: note || "Estimated from local Claude logs at API rates.",
       color: "#DE7356",
     }))
   }
 
-  function persistUsageDaily(ctx, daily, displayName) {
+  function persistUsageDaily(ctx, daily, displayName, source) {
     if (!ctx.host.usageDaily || typeof ctx.host.usageDaily.ingest !== "function") return
     if (!daily || !daily.length) return
     try {
-      ctx.host.usageDaily.ingest({ displayName: displayName, daily: daily })
+      const payload = { displayName: displayName, daily: daily }
+      if (source) payload.source = source
+      ctx.host.usageDaily.ingest(payload)
     } catch (e) { /* ignore */ }
   }
 
   function pushDayUsageLine(lines, ctx, label, dayEntry) {
     const tokens = Number(dayEntry && dayEntry.totalTokens) || 0
     const cost = usageCostUsd(dayEntry)
-    if (tokens > 0) {
+    if (tokens > 0 || cost !== null) {
       lines.push(ctx.line.text({
         label: label,
-        value: costAndTokensLabel({ tokens: tokens, costUSD: cost })
+        value: costAndTokensLabel(
+          { tokens: tokens, costUSD: cost === null ? 0 : cost },
+          { includeZeroTokens: true }
+        )
       }))
       return
     }
@@ -776,6 +1065,61 @@
       label: label,
       value: costAndTokensLabel({ tokens: 0, costUSD: 0 }, { includeZeroTokens: true })
     }))
+  }
+
+  function summarizeUsageDaily(daily) {
+    const summary = { tokens: 0, costUSD: 0, hasCost: false }
+    const selectedDaily = (daily || []).slice(-30)
+    for (let i = 0; i < selectedDaily.length; i++) {
+      const day = selectedDaily[i]
+      const dayTokens = Number(day && day.totalTokens)
+      if (Number.isFinite(dayTokens)) summary.tokens += dayTokens
+      const dayCost = usageCostUsd(day)
+      if (dayCost !== null) {
+        summary.costUSD += dayCost
+        summary.hasCost = true
+      }
+    }
+    return summary
+  }
+
+  function appendUsageDailyLines(lines, ctx, daily, chartNote) {
+    if (!daily || !daily.length) return false
+    const now = new Date()
+    const todayKey = dayKeyFromDate(now)
+    const yesterday = new Date(now.getTime())
+    yesterday.setDate(yesterday.getDate() - 1)
+    const yesterdayKey = dayKeyFromDate(yesterday)
+
+    let todayEntry = null
+    let yesterdayEntry = null
+    for (let i = 0; i < daily.length; i++) {
+      const usageDayKey = dayKeyFromUsageDate(daily[i].date)
+      if (usageDayKey === todayKey) {
+        todayEntry = daily[i]
+        continue
+      }
+      if (usageDayKey === yesterdayKey) {
+        yesterdayEntry = daily[i]
+      }
+    }
+
+    pushDayUsageLine(lines, ctx, "Today", todayEntry)
+    pushDayUsageLine(lines, ctx, "Yesterday", yesterdayEntry)
+
+    const summary = summarizeUsageDaily(daily)
+    if (summary.tokens > 0 || summary.hasCost) {
+      lines.push(ctx.line.text({
+        label: "Last 30 Days",
+        value: costAndTokensLabel({
+          tokens: summary.tokens,
+          costUSD: summary.hasCost ? summary.costUSD : null,
+        }, { includeZeroTokens: true })
+      }))
+    }
+
+    pushUsageChartLine(lines, ctx, daily, chartNote)
+    return summary.tokens > 0 || summary.hasCost
   }
 
   // ── Web mode helpers ───────────────────────────────────────────────────────
@@ -1114,12 +1458,14 @@
   function probe(ctx) {
     const creds = loadCredentials(ctx)
     const sessionKey = getSessionKey(ctx)
+    const adminApiKey = readClaudeAdminApiKey(ctx)
     const hasOAuth = !!(creds && creds.oauth && creds.oauth.accessToken && creds.oauth.accessToken.trim())
     const sourceMode = String(ctx.sourceMode || "auto").toLowerCase()
     const wantsAuto = sourceMode === "auto"
     const wantsWeb = sourceMode === "web"
     const wantsOAuth = sourceMode === "oauth"
     const wantsLocal = sourceMode === "local"
+    const wantsApi = sourceMode === "api"
 
     if (wantsWeb && !sessionKey) {
       ctx.host.log.error("web mode requested but no session key found")
@@ -1129,9 +1475,13 @@
       ctx.host.log.error("oauth mode requested but no OAuth credentials found")
       throw "Not logged in. Run `claude` to authenticate."
     }
-    if (!wantsLocal && !hasOAuth && !sessionKey) {
+    if (wantsApi && !adminApiKey) {
+      ctx.host.log.error("api mode requested but no Claude Admin API key found")
+      throw "Claude API usage needs an Anthropic Admin API key. Set ANTHROPIC_ADMIN_KEY."
+    }
+    if (!wantsLocal && !wantsApi && !hasOAuth && !sessionKey && !adminApiKey) {
       ctx.host.log.error("probe failed: no credentials or session key")
-      throw "Not logged in. Run `claude` to authenticate, or set CLAUDE_AI_SESSION_KEY."
+      throw "Not logged in. Run `claude` to authenticate, set CLAUDE_AI_SESSION_KEY, or set ANTHROPIC_ADMIN_KEY."
     }
 
     const nowMs = Date.now()
@@ -1149,6 +1499,8 @@
 
     if (wantsLocal) {
       ctx.host.log.info("local mode requested; skipping live usage fetch")
+    } else if (wantsApi) {
+      ctx.host.log.info("api mode requested; skipping live quota fetch")
     } else if (hasOAuth && !wantsWeb) {
       // ── OAuth mode ───────────────────────────────────────────────────────
       let accessToken = creds.oauth.accessToken
@@ -1273,13 +1625,15 @@
       } else {
         ctx.host.log.info("skipping live usage fetch for inference-only token")
       }
-    } else {
+    } else if (sessionKey) {
       // ── Web mode ─────────────────────────────────────────────────────────
       const webResult = loadWebUsageData(ctx, sessionKey, nowMs)
       data = webResult.data
       if (webResult.plan) {
         plan = webResult.plan
       }
+    } else {
+      ctx.host.log.info("auto mode using Claude Admin API history only")
     }
 
     if (rateLimited && wantsAuto && sessionKey) {
@@ -1304,60 +1658,43 @@
       addUsageWindowLines(ctx, data, lines)
     }
 
-    // ── Token usage from ccusage ─────────────────────────────────────────────
-    try {
-      const usageResult = queryTokenUsage(ctx, homePath)
-      if (usageResult.status === "ok") {
-        const usage = usageResult.data
-        const now = new Date()
-        const todayKey = dayKeyFromDate(now)
-        const yesterday = new Date(now.getTime())
-        yesterday.setDate(yesterday.getDate() - 1)
-        const yesterdayKey = dayKeyFromDate(yesterday)
-
-        let todayEntry = null
-        let yesterdayEntry = null
-        for (let i = 0; i < usage.daily.length; i++) {
-          const usageDayKey = dayKeyFromUsageDate(usage.daily[i].date)
-          if (usageDayKey === todayKey) {
-            todayEntry = usage.daily[i]
-            continue
-          }
-          if (usageDayKey === yesterdayKey) {
-            yesterdayEntry = usage.daily[i]
-          }
-        }
-
-        pushDayUsageLine(lines, ctx, "Today", todayEntry)
-        pushDayUsageLine(lines, ctx, "Yesterday", yesterdayEntry)
-
-        let totalTokens = 0
-        let totalCostNanos = 0
-        let hasCost = false
-        for (let i = 0; i < usage.daily.length; i++) {
-          const day = usage.daily[i]
-          const dayTokens = Number(day.totalTokens)
-          if (Number.isFinite(dayTokens)) {
-            totalTokens += dayTokens
-          }
-          const dayCost = usageCostUsd(day)
-          if (dayCost != null) {
-            totalCostNanos += Math.round(dayCost * 1e9)
-            hasCost = true
-          }
-        }
-        if (totalTokens > 0) {
+    // ── Token and cost history ───────────────────────────────────────────────
+    let attachedUsageDaily = false
+    if (!wantsLocal && adminApiKey && (wantsAuto || wantsApi)) {
+      try {
+        const adminDaily = fetchClaudeAdminUsage(ctx, adminApiKey)
+        const summary = summarizeUsageDaily(adminDaily)
+        if (summary.hasCost || summary.tokens > 0) {
           lines.push(ctx.line.text({
-            label: "Last 30 Days",
-            value: costAndTokensLabel({ tokens: totalTokens, costUSD: hasCost ? totalCostNanos / 1e9 : null })
+            label: "API Spend",
+            value: summary.hasCost ? "$" + summary.costUSD.toFixed(2) : "$0.00",
           }))
         }
-
-        pushUsageChartLine(lines, ctx, usage.daily)
-        persistUsageDaily(ctx, usage.daily, "Claude")
+        attachedUsageDaily = appendUsageDailyLines(
+          lines,
+          ctx,
+          adminDaily,
+          "Claude Admin API organization usage."
+        )
+        persistUsageDaily(ctx, adminDaily, "Claude", "admin_billing")
+      } catch (e) {
+        const message = e && e.message ? e.message : String(e)
+        if (wantsApi) throw message
+        ctx.host.log.warn("Claude Admin API usage failed: " + message)
       }
-    } catch (e) {
-      ctx.host.log.warn("local Claude token usage failed: " + String(e))
+    }
+
+    if (!attachedUsageDaily && !wantsApi) {
+      try {
+        const usageResult = queryTokenUsage(ctx, homePath)
+        if (usageResult.status === "ok") {
+          const usage = usageResult.data
+          appendUsageDailyLines(lines, ctx, usage.daily, "Estimated from local Claude logs at API rates.")
+          persistUsageDaily(ctx, usage.daily, "Claude")
+        }
+      } catch (e) {
+        ctx.host.log.warn("local Claude token usage failed: " + String(e))
+      }
     }
 
     if (rateLimited) {

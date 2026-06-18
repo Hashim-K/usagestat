@@ -10,7 +10,7 @@
     { "label": "Status", "url": "https://status.anthropic.com/" },
     { "label": "Console", "url": "https://console.anthropic.com/" }
   ],
-  "supportedModes": ["oauth", "web", "local"],
+  "supportedModes": ["oauth", "web", "local", "api"],
   "autoMode": "oauth",
   "webUrl": "https://claude.ai",
   "usageDashboardUrl": "https://claude.ai/settings/usage",
@@ -21,8 +21,10 @@
     { "type": "progress", "label": "Opus", "scope": "detail" },
     { "type": "progress", "label": "Routines", "scope": "detail" },
     { "type": "text", "label": "Extra usage spent", "scope": "overview", "primaryOrder": 3 },
+    { "type": "text", "label": "API Spend", "scope": "overview", "primaryOrder": 4 },
     { "type": "text", "label": "Today", "scope": "detail" },
     { "type": "text", "label": "Yesterday", "scope": "detail" },
-    { "type": "text", "label": "Last 30 Days", "scope": "detail" }
+    { "type": "text", "label": "Last 30 Days", "scope": "detail" },
+    { "type": "barChart", "label": "Usage Trend", "scope": "detail" }
   ]
 }

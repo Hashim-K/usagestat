@@ -11,6 +11,11 @@
   "lines": [
     { "type": "progress", "label": "Premium", "scope": "overview", "primaryOrder": 1 },
     { "type": "progress", "label": "Chat", "scope": "overview", "primaryOrder": 2 },
-    { "type": "progress", "label": "Completions", "scope": "overview" }
+    { "type": "progress", "label": "Completions", "scope": "overview" },
+    { "type": "progress", "label": "Budget - Copilot", "scope": "detail" },
+    { "type": "progress", "label": "Budget - All Premium Request SKUs", "scope": "detail" },
+    { "type": "progress", "label": "Budget - Copilot Agent Premium Requests", "scope": "detail" },
+    { "type": "progress", "label": "Budget - Spark Premium Requests", "scope": "detail" },
+    { "type": "progress", "label": "Budget - Copilot Premium Requests", "scope": "detail" }
   ]
 }

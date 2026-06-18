@@ -2,6 +2,17 @@
   const KEYCHAIN_SERVICE = "OpenUsage-copilot";
   const GH_KEYCHAIN_SERVICE = "gh:github.com";
   const DEFAULT_USAGE_URL = "https://api.github.com/copilot_internal/user";
+  const BUDGETS_URL = "https://github.com/settings/billing/budgets";
+  const COPILOT_PRODUCT_ID = "copilot";
+  const COPILOT_PREMIUM_REQUEST_SKU = "copilot_premium_request";
+  const COPILOT_AGENT_PREMIUM_REQUEST_SKU = "copilot_agent_premium_request";
+  const SPARK_PREMIUM_REQUEST_SKU = "spark_premium_request";
+  const COPILOT_BUDGET_SELECTORS = [
+    COPILOT_PRODUCT_ID,
+    COPILOT_PREMIUM_REQUEST_SKU,
+    COPILOT_AGENT_PREMIUM_REQUEST_SKU,
+    SPARK_PREMIUM_REQUEST_SKU,
+  ];
 
   function readJson(ctx, path) {
     try {
@@ -157,6 +168,363 @@
     });
   }
 
+  function trimText(value) {
+    if (value === null || value === undefined) return null;
+    const text = String(value).trim();
+    return text || null;
+  }
+
+  function readEnv(ctx, name) {
+    try {
+      return trimText(ctx.host.env.get(name));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function providerSetting(ctx, names) {
+    const settings = ctx.provider && ctx.provider.settings ? ctx.provider.settings : {};
+    for (let i = 0; i < names.length; i += 1) {
+      const value = trimText(settings[names[i]]);
+      if (value) return value;
+    }
+    return null;
+  }
+
+  function normalizeCookieHeader(value) {
+    let text = trimText(value);
+    if (!text) return null;
+    text = text.replace(/^Cookie:\s*/i, "").trim();
+    return text || null;
+  }
+
+  function loadBudgetCookieHeader(ctx) {
+    return normalizeCookieHeader(ctx.provider && ctx.provider.cookieHeader) ||
+      normalizeCookieHeader(providerSetting(ctx, ["budgetCookieHeader", "githubCookieHeader", "cookieHeader"])) ||
+      normalizeCookieHeader(readEnv(ctx, "COPILOT_BUDGET_COOKIE_HEADER")) ||
+      normalizeCookieHeader(readEnv(ctx, "COPILOT_BUDGET_COOKIE")) ||
+      normalizeCookieHeader(readEnv(ctx, "GITHUB_COOKIE_HEADER")) ||
+      normalizeCookieHeader(readEnv(ctx, "GITHUB_COOKIE"));
+  }
+
+  function requestGitHubBudget(ctx, url, cookieHeader, accept, nonce) {
+    const headers = {
+      Cookie: cookieHeader,
+      Accept: accept,
+      Referer: BUDGETS_URL,
+      "User-Agent": "CodexBar",
+    };
+    if (accept.indexOf("json") >= 0) {
+      headers["X-Requested-With"] = "XMLHttpRequest";
+      headers["GitHub-Verified-Fetch"] = "true";
+      if (nonce) headers["X-Fetch-Nonce"] = nonce;
+    }
+
+    return ctx.util.request({
+      method: "GET",
+      url: url,
+      headers: headers,
+      timeoutMs: 15000,
+    });
+  }
+
+  function extractFetchNonce(html) {
+    const patterns = [
+      /x-fetch-nonce"\s+content="([^"]+)"/i,
+      /X-Fetch-Nonce"\s*:\s*"([^"]+)"/i,
+      /fetchNonce"\s*:\s*"([^"]+)"/i,
+      /data-fetch-nonce="([^"]+)"/i,
+    ];
+    for (let i = 0; i < patterns.length; i += 1) {
+      const match = patterns[i].exec(html);
+      if (match && match[1]) return match[1];
+    }
+    return null;
+  }
+
+  function fetchBudgetNonce(ctx, cookieHeader) {
+    try {
+      const resp = requestGitHubBudget(ctx, BUDGETS_URL, cookieHeader, "text/html,application/xhtml+xml", null);
+      if (resp.status !== 200) return null;
+      return extractFetchNonce(resp.bodyText || "");
+    } catch (e) {
+      ctx.host.log.info("Copilot budget nonce fetch failed: " + String(e));
+      return null;
+    }
+  }
+
+  function budgetPageUrl(page) {
+    return BUDGETS_URL + "?page=" + encodeURIComponent(String(page)) + "&page_size=10&scope=customer";
+  }
+
+  function fetchBudgetPage(ctx, cookieHeader, nonce, page) {
+    const resp = requestGitHubBudget(ctx, budgetPageUrl(page), cookieHeader, "application/json", nonce);
+    if (resp.status === 401 || resp.status === 403) {
+      throw "GitHub web session is not logged in.";
+    }
+    if (resp.status < 200 || resp.status >= 300) {
+      throw "GitHub budget request failed (HTTP " + String(resp.status) + ").";
+    }
+    const json = ctx.util.tryParseJson(resp.bodyText);
+    if (!json) throw "GitHub budget response invalid.";
+    const payload = json.payload && typeof json.payload === "object" ? json.payload : json;
+    let budgets = [];
+    if (Array.isArray(payload.budgets)) budgets = payload.budgets;
+    else if (Array.isArray(payload.data)) budgets = payload.data;
+    else if (Array.isArray(json)) budgets = json;
+    const hasNextPage = payload.hasNextPage === true || payload.has_next_page === true;
+    return { budgets: budgets, hasNextPage: hasNextPage };
+  }
+
+  function parseAmount(value, centsKey) {
+    if (typeof value === "number" && Number.isFinite(value)) return centsKey ? value / 100 : value;
+    if (typeof value === "string" && value.trim()) {
+      const trimmed = value.trim();
+      const negative = trimmed[0] === "-";
+      if (trimmed.slice(negative ? 1 : 0).indexOf("-") >= 0) return null;
+      const unsigned = trimmed.replace(/[^0-9.]/g, "");
+      if (!unsigned) return null;
+      const parsed = Number((negative ? "-" : "") + unsigned);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    if (value && typeof value === "object") {
+      const keys = ["amount", "value", "total", "cents", "formatted"];
+      for (let i = 0; i < keys.length; i += 1) {
+        const key = keys[i];
+        const parsed = parseAmount(value[key], key === "cents");
+        if (parsed !== null) return parsed;
+      }
+    }
+    return null;
+  }
+
+  function readString(row, keys) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const value = row && row[keys[i]];
+      if (typeof value === "string" && value.trim()) return value.trim();
+      if (typeof value === "number" && Number.isFinite(value)) return String(value);
+    }
+    return null;
+  }
+
+  function productSelectorsFromObject(value) {
+    if (!value || typeof value !== "object") return [];
+    const keys = ["sku", "name", "display_name", "displayName", "product", "product_name", "productName"];
+    const out = [];
+    for (let i = 0; i < keys.length; i += 1) {
+      const text = readString(value, [keys[i]]);
+      if (text) out.push(text);
+    }
+    return out;
+  }
+
+  function readStringArray(row, keys) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const value = row && row[keys[i]];
+      if (Array.isArray(value) && value.length) {
+        const out = [];
+        for (let j = 0; j < value.length; j += 1) {
+          if (typeof value[j] === "string" && value[j].trim()) out.push(value[j].trim());
+          else out.push.apply(out, productSelectorsFromObject(value[j]));
+        }
+        if (out.length) return out;
+      }
+      if (typeof value === "string" && value.trim()) return [value.trim()];
+    }
+    return [];
+  }
+
+  function readAmount(row, keys) {
+    for (let i = 0; i < keys.length; i += 1) {
+      const parsed = parseAmount(row && row[keys[i]], false);
+      if (parsed !== null) return parsed;
+    }
+    return 0;
+  }
+
+  function slug(value) {
+    return String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  }
+
+  function normalizedBillingIdentifier(value) {
+    const raw = slug(value);
+    if (!raw) return null;
+    const underscored = raw.replace(/-/g, "_");
+    if (underscored === COPILOT_PRODUCT_ID) return COPILOT_PRODUCT_ID;
+    if (underscored === "premium_request" || underscored === "premium_requests") {
+      return COPILOT_PREMIUM_REQUEST_SKU;
+    }
+    if (underscored === "coding_agent_premium_request" || underscored === "coding_agent_premium_requests") {
+      return COPILOT_AGENT_PREMIUM_REQUEST_SKU;
+    }
+    if (underscored.indexOf("spark") >= 0 &&
+        underscored.indexOf("premium") >= 0 &&
+        underscored.indexOf("request") >= 0) {
+      return SPARK_PREMIUM_REQUEST_SKU;
+    }
+    if ((underscored.indexOf("cloud") >= 0 || underscored.indexOf("coding") >= 0) &&
+        underscored.indexOf("agent") >= 0 &&
+        underscored.indexOf("premium") >= 0 &&
+        underscored.indexOf("request") >= 0) {
+      return COPILOT_AGENT_PREMIUM_REQUEST_SKU;
+    }
+    if (underscored.indexOf("bundled") >= 0 &&
+        underscored.indexOf("premium") >= 0 &&
+        underscored.indexOf("request") >= 0) {
+      return COPILOT_PREMIUM_REQUEST_SKU;
+    }
+    if (underscored.indexOf("copilot") >= 0 &&
+        underscored.indexOf("agent") >= 0 &&
+        underscored.indexOf("premium") >= 0 &&
+        underscored.indexOf("request") >= 0) {
+      return COPILOT_AGENT_PREMIUM_REQUEST_SKU;
+    }
+    if (underscored.indexOf("copilot") >= 0 &&
+        underscored.indexOf("premium") >= 0 &&
+        underscored.indexOf("request") >= 0) {
+      return COPILOT_PREMIUM_REQUEST_SKU;
+    }
+    return underscored;
+  }
+
+  function parseBudget(row) {
+    const productSkus = readStringArray(row, [
+      "budget_product_skus",
+      "budgetProductSkus",
+      "budget_product_sku",
+      "budgetProductSku",
+      "product_skus",
+      "productSkus",
+      "skus",
+      "sku",
+      "product",
+      "product_name",
+      "productName",
+      "pricing_target_id",
+      "pricingTargetId",
+    ]);
+    const budget = {
+      id: readString(row, ["id", "uuid", "budget_id", "budgetId"]),
+      name: readString(row, ["name", "display_name", "displayName", "title"]),
+      budgetType: readString(row, ["budget_type", "budgetType", "type", "pricing_target_type", "pricingTargetType"]),
+      budgetProductSkus: productSkus,
+      budgetEntityName: readString(row, [
+        "budget_entity_name",
+        "budgetEntityName",
+        "entity_name",
+        "entityName",
+        "target_name",
+        "targetName",
+      ]),
+      budgetAmount: readAmount(row, [
+        "budget_amount",
+        "budgetAmount",
+        "target_amount",
+        "targetAmount",
+        "spending_limit",
+        "spendingLimit",
+        "limit",
+        "amount",
+        "max",
+      ]),
+      currentAmount: readAmount(row, [
+        "current_usage",
+        "currentUsage",
+        "current_amount",
+        "currentAmount",
+        "usage_amount",
+        "usageAmount",
+        "usage",
+        "spent",
+        "amount_used",
+        "amountUsed",
+      ]),
+    };
+    const selectorValues = budget.budgetProductSkus.concat([
+      budget.budgetType,
+      budget.budgetEntityName,
+      budget.name,
+    ]).filter(Boolean);
+    budget.selectors = selectorValues
+      .map(normalizedBillingIdentifier)
+      .filter(Boolean);
+    return budget;
+  }
+
+  function hasCopilotSelector(selectors) {
+    for (let i = 0; i < selectors.length; i += 1) {
+      for (let j = 0; j < COPILOT_BUDGET_SELECTORS.length; j += 1) {
+        if (selectors[i] === COPILOT_BUDGET_SELECTORS[j]) return true;
+      }
+    }
+    return false;
+  }
+
+  function budgetTitle(budget) {
+    const selectors = budget.selectors || [];
+    let type = null;
+    if (selectors.length === 1 && selectors[0] === COPILOT_PRODUCT_ID) {
+      type = "Copilot";
+    } else if (selectors.indexOf(COPILOT_AGENT_PREMIUM_REQUEST_SKU) >= 0) {
+      type = "Copilot Agent Premium Requests";
+    } else if (selectors.indexOf(SPARK_PREMIUM_REQUEST_SKU) >= 0) {
+      type = "Spark Premium Requests";
+    } else if (selectors.indexOf(COPILOT_PREMIUM_REQUEST_SKU) >= 0) {
+      type = "All Premium Request SKUs";
+    } else {
+      type = budget.name || "Copilot Premium Requests";
+    }
+    return "Budget - " + type;
+  }
+
+  function nextMonthResetIso() {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth() + 1, 1).toISOString();
+  }
+
+  function budgetToLine(ctx, budget, resetIso) {
+    if (!budget || !(budget.budgetAmount > 0) || !hasCopilotSelector(budget.selectors || [])) return null;
+    const used = Math.max(0, budget.currentAmount || 0);
+    const limit = Math.max(0, budget.budgetAmount || 0);
+    return ctx.line.progress({
+      label: budgetTitle(budget),
+      used: used,
+      limit: limit,
+      format: { kind: "dollars" },
+      resetsAt: resetIso,
+      detail: "$" + used.toFixed(2) + " / $" + limit.toFixed(2),
+    });
+  }
+
+  function fetchBudgetLines(ctx) {
+    const cookieHeader = loadBudgetCookieHeader(ctx);
+    if (!cookieHeader) return [];
+
+    const nonce = fetchBudgetNonce(ctx, cookieHeader);
+    const budgets = [];
+    let page = 1;
+    let keepGoing = true;
+    while (keepGoing && page <= 20) {
+      const response = fetchBudgetPage(ctx, cookieHeader, nonce, page);
+      for (let i = 0; i < response.budgets.length; i += 1) {
+        budgets.push(response.budgets[i]);
+      }
+      keepGoing = response.hasNextPage === true;
+      page += 1;
+    }
+
+    const resetIso = nextMonthResetIso();
+    const lines = [];
+    for (let i = 0; i < budgets.length; i += 1) {
+      const line = budgetToLine(ctx, parseBudget(budgets[i]), resetIso);
+      if (line) lines.push(line);
+    }
+    return lines;
+  }
+
   function makeProgressLine(ctx, label, snapshot, resetDate) {
     if (!snapshot || typeof snapshot.percent_remaining !== "number")
       return null;
@@ -288,6 +656,15 @@
 
       const completionsLine = makeLimitedProgressLine(ctx, "Completions", lq.completions, mq.completions, resetDate);
       if (completionsLine) lines.push(completionsLine);
+    }
+
+    try {
+      const budgetLines = fetchBudgetLines(ctx);
+      for (let i = 0; i < budgetLines.length; i += 1) {
+        lines.push(budgetLines[i]);
+      }
+    } catch (e) {
+      ctx.host.log.warn("Copilot budget extras failed: " + String(e));
     }
 
     if (lines.length === 0) {

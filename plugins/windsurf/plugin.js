@@ -9,6 +9,16 @@
 
   var VARIANTS = [
     {
+      marker: "devin-windsurf",
+      ideName: "windsurf",
+      stateDb: "~/Library/Application Support/Devin/User/globalStorage/state.vscdb",
+    },
+    {
+      marker: "devin-next-windsurf",
+      ideName: "windsurf-next",
+      stateDb: "~/Library/Application Support/Devin - Next/User/globalStorage/state.vscdb",
+    },
+    {
       marker: "windsurf",
       ideName: "windsurf",
       stateDb: "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb",
@@ -27,6 +37,16 @@
       marker: "windsurf-next",
       ideName: "windsurf-next",
       stateDb: "~/.config/Windsurf - Next/User/globalStorage/state.vscdb",
+    },
+    {
+      marker: "devin-windsurf",
+      ideName: "windsurf",
+      stateDb: "~/.config/Devin/User/globalStorage/state.vscdb",
+    },
+    {
+      marker: "devin-next-windsurf",
+      ideName: "windsurf-next",
+      stateDb: "~/.config/Devin - Next/User/globalStorage/state.vscdb",
     },
   ]
 
