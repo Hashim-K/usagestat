@@ -134,7 +134,7 @@ jobs:
         if: matrix.platform == 'ppa'
         run: |
           sudo apt-get update
-          sudo apt-get install -y debhelper devscripts dput gnupg
+          sudo apt-get install -y build-essential debhelper devscripts dput gnupg
       - name: Validate and publish AUR
         if: matrix.platform == 'aur'
         env:
