@@ -34,6 +34,17 @@ Set these **repository variables**:
 | `AUR_SSH_KNOWN_HOSTS` | Verified `aur.archlinux.org` SSH known-hosts entry. Strict host verification stays enabled. |
 | `PPA_GPG_FINGERPRINT` | Full fingerprint of the imported Launchpad signing key. |
 
+Create new AUR SSH and Launchpad OpenPGP keys alongside existing account keys;
+do not replace them. Launchpad requires the new public key to be published to
+its keyserver and confirmed on the uploader account. A CI signing subkey can
+be exported without exposing the primary private key.
+
+COPR has one API token per account: `copr-cli new-api-token` invalidates the
+existing token. For an independent CI credential, use a separate Fedora
+account granted builder access to `hashimkarim/usagestat`. Its configuration
+still belongs in `COPR_CONFIG`; the project owner does not change. Reusing an
+existing token does not rotate it, but should be an explicit choice.
+
 Use dedicated publishing credentials where possible. The Homebrew key only
 needs access to the tap, not a personal GitHub account token. Secrets are kept
 out of package artifacts and Git remotes; temporary key files are removed on
