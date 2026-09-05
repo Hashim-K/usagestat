@@ -1,0 +1,41 @@
+name: Test release publishing
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/publish-packages.yml'
+      - '.github/workflows/publishing-tests.yml'
+      - 'tools/publish/**'
+      - 'packaging/**'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - '.github/workflows/publish-packages.yml'
+      - '.github/workflows/publishing-tests.yml'
+      - 'tools/publish/**'
+      - 'packaging/**'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test archive validation, recipes, and remote publication states
+        run: python3 -m unittest discover -s tools/publish/tests -v
+      - name: Check shell scripts and package recipes
+        run: |
+          bash -n tools/publish/scripts/publish-platform.sh
+          bash -n packaging/aur/usagestat-bin/PKGBUILD
+          ruby -c packaging/homebrew/Formula/usagestat.rb
+          shellcheck tools/publish/scripts/publish-platform.sh
+      - name: Validate workflows
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:latest \
+            .github/workflows/release.yml \
+            .github/workflows/publish-packages.yml \
+            .github/workflows/publishing-tests.yml

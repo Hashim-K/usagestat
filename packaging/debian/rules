@@ -1,0 +1,16 @@
+#!/usr/bin/make -f
+
+DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+
+%:
+	dh $@
+
+override_dh_auto_build:
+
+override_dh_auto_test:
+
+override_dh_auto_install:
+	install -Dm0755 bin/$(DEB_HOST_ARCH)/usagestat debian/usagestat/usr/bin/usagestat
+	install -Dm0755 bin/$(DEB_HOST_ARCH)/usagestatd debian/usagestat/usr/bin/usagestatd
+	mkdir -p debian/usagestat/usr/share/usagestat
+	cp -a plugins debian/usagestat/usr/share/usagestat/

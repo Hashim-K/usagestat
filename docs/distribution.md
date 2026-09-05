@@ -1,5 +1,75 @@
 # Release distribution
 
+## Automatic publishing
+
+Stable `vMAJOR.MINOR.PATCH` tags now run the complete release pipeline:
+
+1. Run the workspace tests and build both Linux architectures.
+2. Publish the GitHub release and its checksums.
+3. Publish AUR, Homebrew, Fedora COPR, and the Ubuntu PPA in independent jobs.
+
+Prereleases such as `v1.0.4-beta.1` remain on GitHub. Package publishing validates
+that the requested tag is the latest published stable release, verifies both
+archive checksums and architectures, and generates recipe versions/checksums
+from those downloads. A missing credential fails the affected job explicitly;
+it does not silently skip a repository or prevent the other repositories from
+publishing.
+
+### One-time GitHub Actions configuration
+
+Set these **repository secrets** on `Hashim-K/usagestat`:
+
+| Secret | Value |
+| --- | --- |
+| `AUR_SSH_PRIVATE_KEY` | Unencrypted SSH private key registered to the AUR maintainer of `usagestat-bin`. |
+| `HOMEBREW_SSH_PRIVATE_KEY` | Unencrypted SSH private key whose public key is a **write-enabled deploy key** on `Hashim-K/homebrew-tap`. |
+| `COPR_CONFIG` | Complete COPR API configuration, including the `[copr-cli]` section, login, token, and username. |
+| `PPA_GPG_PRIVATE_KEY` | ASCII-armored private signing key registered to the Launchpad PPA uploader. |
+| `PPA_GPG_PASSPHRASE` | Signing-key passphrase, if the exported key is protected; otherwise omit. |
+
+Set these **repository variables**:
+
+| Variable | Value |
+| --- | --- |
+| `AUR_SSH_KNOWN_HOSTS` | Verified `aur.archlinux.org` SSH known-hosts entry. Strict host verification stays enabled. |
+| `PPA_GPG_FINGERPRINT` | Full fingerprint of the imported Launchpad signing key. |
+
+Use dedicated publishing credentials where possible. The Homebrew key only
+needs access to the tap, not a personal GitHub account token. Secrets are kept
+out of package artifacts and Git remotes; temporary key files are removed on
+exit. Dry runs do not upload packages or require publishing credentials.
+
+### Retry an existing release
+
+In **Actions → Publish package repositories → Run workflow**, select `main`,
+enter the existing stable tag, choose `all` or one repository, and set **dry_run**
+to false to publish. For example:
+
+```bash
+gh workflow run publish-packages.yml --ref main \
+  -f tag=v1.0.3 -f platform=all -F dry_run=false
+```
+
+Leave `dry_run=true` for a rehearsal. This supports publishing a release made
+before the automation was added, without moving its tag or rebuilding its
+GitHub assets. AUR and Homebrew commit only changed recipes. COPR waits for an
+existing build, or submits a new build if no successful attempt exists. The PPA
+waits for existing uploads and for the resulting binaries to be published;
+already used PPA versions cannot be uploaded again after a failed build. Retry
+that build in Launchpad, or change the Debian package revision deliberately.
+
+Repository jobs are serialized per platform and have a 75-minute timeout.
+Remote build/publishing waits have a 45-minute timeout. A timeout reports a
+failure; rerunning the job checks the existing remote state first. Generated
+recipes and Debian source packages are retained as workflow artifacts.
+
+The AUR package targets x86-64. Homebrew supports Linux x86-64 and ARM64. COPR
+builds the project's enabled Fedora targets. The PPA keeps the existing `noble`
+series and `-1ppa1` version scheme, and supports its enabled amd64/arm64 builders.
+As in the existing PPA, its Debian source package wraps the validated release
+binaries and plugins. Both the CLI and daemon are installed. It does not run
+Cargo on Launchpad.
+
 ## Local-first publishing
 
 Publishing should be rehearsed locally before pushing a release tag or
@@ -97,7 +167,7 @@ A separate source-build `usagestat` AUR package should wait until the CLI crate 
 
 ## Homebrew
 
-Create `github.com/Hashim-K/homebrew-tap` and copy `packaging/homebrew/Formula/usagestat.rb` to `Formula/usagestat.rb`.
+The existing tap is `github.com/Hashim-K/homebrew-tap`. For manual publishing, copy `packaging/homebrew/Formula/usagestat.rb` to `Formula/usagestat.rb`.
 
 For each release, update:
 
@@ -155,7 +225,7 @@ tools/publish/scripts/ppa-shell.sh
 Inside the shell, prepare a Debian source package with a signed `.dsc` and
 upload it with `dput`.
 
-User install command after the PPA exists:
+User install command:
 
 ```bash
 add-apt-repository ppa:hashimkarim/usagestat

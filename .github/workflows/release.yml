@@ -17,6 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Check tag matches the package version
+        run: |
+          python3 - <<'PY'
+          import os, tomllib
+          with open('Cargo.toml', 'rb') as manifest:
+              version = tomllib.load(manifest)['workspace']['package']['version']
+          assert os.environ['GITHUB_REF_NAME'] == 'v' + version, 'Release tag must match Cargo.toml'
+          PY
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo test --locked --workspace
 
@@ -115,3 +123,12 @@ jobs:
             dist/usagestat-linux-aarch64.tar.gz.sha256
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  packages:
+    name: Publish package repositories
+    needs: release
+    if: ${{ !contains(github.ref_name, '-') }}
+    uses: ./.github/workflows/publish-packages.yml
+    with:
+      tag: ${{ github.ref_name }}
+    secrets: inherit

@@ -1,0 +1,15 @@
+Source: usagestat
+Section: utils
+Priority: optional
+Maintainer: Hashim Karim <hashimkarim168@gmail.com>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.2
+Homepage: https://github.com/Hashim-K/usagestat
+Rules-Requires-Root: no
+
+Package: usagestat
+Architecture: amd64 arm64
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: scriptable CLI and daemon for local agent usage data
+ usagestat probes and exports local agent usage data from supported tools.
+ Includes the background daemon, web dashboard, and provider plugins.

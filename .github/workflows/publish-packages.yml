@@ -1,0 +1,177 @@
+name: Publish package repositories
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        type: string
+        required: true
+    secrets:
+      AUR_SSH_PRIVATE_KEY:
+        required: false
+      HOMEBREW_SSH_PRIVATE_KEY:
+        required: false
+      COPR_CONFIG:
+        required: false
+      PPA_GPG_PRIVATE_KEY:
+        required: false
+      PPA_GPG_PASSPHRASE:
+        required: false
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing stable GitHub release (e.g. v1.0.3)
+        required: true
+        type: string
+      platform:
+        description: Repository to publish or retry
+        type: choice
+        default: all
+        options: [all, aur, homebrew, copr, ppa]
+      dry_run:
+        description: Validate packages without publishing or using credentials
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate release
+    runs-on: ubuntu-24.04
+    outputs:
+      platforms: ${{ steps.platforms.outputs.value }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check stable release and choose repositories
+        id: platforms
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          PLATFORM: ${{ inputs.platform || 'all' }}
+        run: |
+          python3 - <<'PY'
+          import importlib.util, json, os, subprocess
+          spec = importlib.util.spec_from_file_location('prepare', 'tools/publish/scripts/prepare-packages.py')
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+          tag = os.environ['RELEASE_TAG']
+          module.stable_version(tag)
+          repo = os.environ['GITHUB_REPOSITORY']
+          release = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/tags/{tag}']))
+          latest = json.loads(subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/latest']))
+          assert not release['draft'] and not release['prerelease'], 'A published stable release is required'
+          assert latest['tag_name'] == tag, 'Only the latest stable release may update package repositories'
+          platforms = ['aur', 'homebrew', 'copr', 'ppa']
+          selected = os.environ['PLATFORM']
+          assert selected == 'all' or selected in platforms
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('value=' + json.dumps(platforms if selected == 'all' else [selected]) + '\n')
+          PY
+
+  publish:
+    name: ${{ matrix.platform }}
+    needs: validate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.validate.outputs.platforms) }}
+    concurrency:
+      group: package-${{ matrix.platform }}
+      cancel-in-progress: false
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      DRY_RUN: ${{ inputs.dry_run && 'true' || 'false' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check publishing credentials
+        if: env.DRY_RUN != 'true'
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_SSH_KNOWN_HOSTS: ${{ vars.AUR_SSH_KNOWN_HOSTS }}
+          HOMEBREW_SSH_PRIVATE_KEY: ${{ secrets.HOMEBREW_SSH_PRIVATE_KEY }}
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+          PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+          PPA_GPG_FINGERPRINT: ${{ vars.PPA_GPG_FINGERPRINT }}
+        run: |
+          python3 - <<'PY'
+          import os
+          required = {
+              'aur': ['AUR_SSH_PRIVATE_KEY', 'AUR_SSH_KNOWN_HOSTS'],
+              'homebrew': ['HOMEBREW_SSH_PRIVATE_KEY'],
+              'copr': ['COPR_CONFIG'],
+              'ppa': ['PPA_GPG_PRIVATE_KEY', 'PPA_GPG_FINGERPRINT'],
+          }[os.environ['PLATFORM']]
+          missing = [name for name in required if not os.environ.get(name)]
+          if missing:
+              raise SystemExit('Missing publishing configuration: ' + ', '.join(missing) + '. See docs/distribution.md.')
+          PY
+      - name: Download and validate release archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
+            --pattern '*.tar.gz' --pattern '*.tar.gz.sha256'
+          python3 tools/publish/scripts/prepare-packages.py "$RELEASE_TAG" assets prepared
+      - name: Install Homebrew recipe tools
+        if: matrix.platform == 'homebrew'
+        run: sudo apt-get update && sudo apt-get install -y ruby
+      - name: Install COPR tools
+        if: matrix.platform == 'copr'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rpm
+          pipx install copr-cli
+      - name: Install Debian packaging tools
+        if: matrix.platform == 'ppa'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debhelper devscripts dput gnupg
+      - name: Validate and publish AUR
+        if: matrix.platform == 'aur'
+        env:
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          AUR_SSH_KNOWN_HOSTS: ${{ vars.AUR_SSH_KNOWN_HOSTS }}
+        run: tools/publish/scripts/publish-platform.sh aur prepared
+      - name: Validate and publish Homebrew
+        if: matrix.platform == 'homebrew'
+        env:
+          HOMEBREW_SSH_PRIVATE_KEY: ${{ secrets.HOMEBREW_SSH_PRIVATE_KEY }}
+        run: tools/publish/scripts/publish-platform.sh homebrew prepared
+      - name: Validate and publish COPR
+        if: matrix.platform == 'copr'
+        env:
+          COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
+        run: tools/publish/scripts/publish-platform.sh copr prepared
+      - name: Validate and publish Ubuntu PPA
+        if: matrix.platform == 'ppa'
+        env:
+          PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+          PPA_GPG_PASSPHRASE: ${{ secrets.PPA_GPG_PASSPHRASE }}
+          PPA_GPG_FINGERPRINT: ${{ vars.PPA_GPG_FINGERPRINT }}
+        run: tools/publish/scripts/publish-platform.sh ppa prepared
+      - name: Save package recipes and Debian source package
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.platform }}-${{ inputs.tag }}-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: |
+            prepared/PKGBUILD
+            prepared/aur/.SRCINFO
+            prepared/usagestat.rb
+            prepared/usagestat.spec
+            prepared/*.dsc
+            prepared/*.changes
+            prepared/*.buildinfo
+            prepared/*.orig.tar.gz
+            prepared/*.debian.tar.xz
+            prepared/*.deb

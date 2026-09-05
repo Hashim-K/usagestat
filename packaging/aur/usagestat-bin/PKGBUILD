@@ -19,5 +19,6 @@ package() {
     install -Dm755 "${srcdir}/usagestatd" "${pkgdir}/usr/bin/usagestatd"
   fi
   install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+  mkdir -p "${pkgdir}/usr/share/usagestat"
   cp -a "${srcdir}/plugins" "${pkgdir}/usr/share/usagestat/"
 }
