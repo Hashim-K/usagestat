@@ -1,5 +1,5 @@
 Name:           usagestat
-Version:        1.0.2
+Version:        1.0.3
 Release:        1%{?dist}
 Summary:        Scriptable CLI for local agent usage data
 
@@ -38,6 +38,9 @@ cargo test --locked -p usagestat-cli -p usagestat-daemon
 %{_datadir}/usagestat/plugins
 
 %changelog
+* Sun Sep 06 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.3-1
+- Release 1.0.3 with daemon controls, T3 integration, and dashboard opener
+
 * Mon May 18 2026 Hashim-K <Hashim-K@users.noreply.github.com> - 1.0.2-1
 - Add usagestat test https smoke-test command
 
