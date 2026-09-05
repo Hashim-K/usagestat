@@ -36,6 +36,92 @@ usagestat list
 
 When running through Cargo, everything after `--` is passed to `usagestat`.
 
+## Optional background daemon
+
+On Linux with a systemd user session, install or build both binaries to enable
+automatic startup at login:
+
+```bash
+cargo build -p usagestat-cli -p usagestat-daemon
+./target/debug/usagestat daemon enable
+./target/debug/usagestat daemon status
+./target/debug/usagestat daemon disable
+```
+
+`enable` starts the daemon now and registers `usagestat.service` in your systemd
+user configuration. The dashboard at `http://127.0.0.1:6736/dashboard` and native
+API serve all enabled providers. Startup checks the daemon's `/health` endpoint.
+Repeating `enable` restarts with the selected settings and remembers the last
+T3 mode. `disable` stops the daemon and turns autostart off, preserving that
+mode and its key. `status` supports `--json`. Regular CLI usage does not
+enable or start the service.
+
+T3 compatibility is a separate opt-in:
+
+```bash
+usagestat daemon t3 auto
+usagestat daemon enable
+usagestat daemon key
+usagestat daemon t3 off
+```
+
+`t3 auto` exposes the compatibility endpoint whenever the daemon runs and
+generates a private management key if missing. `t3 off` keeps the bridge
+disabled. `key` prints the key for T3 Code's Add hub dialog. These modes do not
+detect T3 or start the daemon themselves. They preserve the service's bind
+address, binary, config, plugin paths, and autostart setting. A running daemon
+restarts to apply a mode change; a stopped daemon stays stopped.
+
+Plain `enable` uses the last T3 mode, including after a full `disable`.
+The preference is stored in `~/.config/usagestat/daemon.json` (respecting
+`XDG_CONFIG_HOME` and the dev profile). You can set it before first enabling
+the daemon. T3 starts off by default; a retained key alone does not enable it.
+When T3 is off, startup neither creates nor reads that key. Managed services
+ignore `USAGESTAT_MANAGEMENT_KEY` in their environment so the saved mode
+controls the bridge. Older saved boolean settings migrate to `auto` or `off`.
+
+`daemon status` distinguishes the saved mode from local connection availability:
+
+```text
+T3: auto · available
+T3: auto · unavailable (daemon stopped)
+T3: auto · unavailable (bridge not responding)
+T3: off
+```
+
+Availability requires an authenticated response from the local quota endpoint.
+JSON output exposes `t3Mode` (`auto` or `off`) and `t3Available` separately.
+The earlier shortcuts remain: `enable --t3` starts the daemon with mode `auto`,
+`disable --t3` selects `off`, and `toggle --t3` switches between the two modes.
+
+The daemon defaults to `127.0.0.1:6736`. Set `daemon enable --bind ADDRESS:PORT`
+or `--binary /path/to/usagestatd` when needed. Global `--config` and `--plugin-dir`
+options apply to the installed service, with their paths resolved at setup time.
+The dev installers include both binaries; use `usagestat-dev daemon enable` for
+the separate `usagestat-dev.service` and dev profile.
+
+See [T3 Code setup](t3-code.md) for connection details and current T3 limitations.
+
+## Open the dashboard
+
+```bash
+usagestat dashboard
+usagestat dashboard --url
+usagestat dashboard --json
+```
+
+`dashboard` opens the native usage dashboard in your default browser after
+checking that the daemon responds. It uses the managed service's bind address,
+or `127.0.0.1:6736` when no managed service is configured. Wildcard bind
+addresses resolve to loopback. Use `--bind ADDRESS:PORT` for a manually started
+daemon at another address.
+
+If the daemon is stopped, the command prints startup guidance. It does not
+enable autostart or change T3's mode. `--url` prints only the link, including
+while the daemon is stopped; `--json` emits `{"dashboardUrl":"..."}`. Both skip
+the browser and health check, so they work over SSH. The dev CLI resolves its
+own service settings with `usagestat-dev dashboard`.
+
 ## Quick Start
 
 List discovered providers:

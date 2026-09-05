@@ -17,6 +17,7 @@ class Usagestat < Formula
 
   def install
     bin.install "usagestat"
+    bin.install "usagestatd" if File.exist?("usagestatd")
     (share/"usagestat").install "plugins"
   end
 

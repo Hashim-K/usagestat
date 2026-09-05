@@ -1,0 +1,122 @@
+//! Read complete, bounded HTTP headers before routing or authenticating a request.
+use std::io::{self, BufRead, BufReader, Read};
+
+const MAX_HEADER_BYTES: u64 = 16 * 1024;
+
+pub struct Request {
+    pub method: String,
+    pub path: String,
+    pub headers: Vec<(String, String)>,
+}
+
+impl Request {
+    pub fn header(&self, name: &str) -> Option<&str> {
+        let mut values = self
+            .headers
+            .iter()
+            .filter(|(key, _)| key.eq_ignore_ascii_case(name));
+        let (_, value) = values.next()?;
+        // Ambiguous credentials must never authenticate.
+        if values.next().is_some() {
+            return None;
+        }
+        Some(value)
+    }
+}
+
+pub fn read_request(reader: impl Read) -> io::Result<Request> {
+    let mut reader = BufReader::new(reader.take(MAX_HEADER_BYTES));
+    let mut lines = Vec::new();
+    loop {
+        let mut line = String::new();
+        reader.read_line(&mut line)?;
+        if !line.ends_with("\r\n") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "incomplete HTTP headers",
+            ));
+        }
+        line.truncate(line.len() - 2);
+        if line.is_empty() {
+            break;
+        }
+        lines.push(line);
+    }
+
+    let invalid = || io::Error::new(io::ErrorKind::InvalidData, "invalid HTTP headers");
+    let mut lines = lines.into_iter();
+    let first = lines.next().ok_or_else(invalid)?;
+    let parts: Vec<_> = first.split_whitespace().collect();
+    if parts.len() != 3
+        || !parts[1].starts_with('/')
+        || !matches!(parts[2], "HTTP/1.0" | "HTTP/1.1")
+    {
+        return Err(invalid());
+    }
+    let path = parts[1].split('?').next().unwrap().trim_end_matches('/');
+    let mut headers = Vec::new();
+    for line in lines {
+        let (key, value) = line.split_once(':').ok_or_else(invalid)?;
+        if key.is_empty()
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b"!#$%&'*+-.^_`|~".contains(&b))
+            || value.bytes().any(|b| (b < 32 && b != b'\t') || b == 127)
+        {
+            return Err(invalid());
+        }
+        headers.push((key.to_ascii_lowercase(), value.trim().to_string()));
+    }
+    Ok(Request {
+        method: parts[0].to_string(),
+        path: if path.is_empty() {
+            "/".to_string()
+        } else {
+            path.to_string()
+        },
+        headers,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fragmented<'a>(&'a [u8]);
+    impl Read for Fragmented<'_> {
+        fn read(&mut self, out: &mut [u8]) -> io::Result<usize> {
+            let count = out.len().min(3);
+            self.0.read(&mut out[..count])
+        }
+    }
+
+    #[test]
+    fn reads_fragmented_headers_and_normalizes_paths() {
+        let request = read_request(Fragmented(b"GET /v0/management/quota-scheduler/status/?x=1 HTTP/1.1\r\naUtHoRiZaTiOn: Bearer test-key\r\n\r\n")).unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.path, "/v0/management/quota-scheduler/status");
+        assert_eq!(request.header("authorization"), Some("Bearer test-key"));
+    }
+
+    #[test]
+    fn rejects_incomplete_oversized_or_malformed_headers() {
+        for input in [
+            "GET / HTTP/1.1\r\nAuthorization: Bearer test-key\r\n".to_string(),
+            format!(
+                "GET / HTTP/1.1\r\nX-Large: {}\r\n\r\n",
+                "x".repeat(MAX_HEADER_BYTES as usize)
+            ),
+            "GET / HTTP/1.1\r\nAuthorization Bearer test-key\r\n\r\n".to_string(),
+            "GET / HTTP/1.1\r\nAuthorization: Bearer test-key\0\r\n\r\n".to_string(),
+            "\r\n".to_string(),
+        ] {
+            assert!(read_request(input.as_bytes()).is_err());
+        }
+    }
+
+    #[test]
+    fn duplicate_credentials_are_ambiguous() {
+        let request = read_request(&b"GET / HTTP/1.1\r\nAuthorization: Bearer one\r\nauthorization: Bearer two\r\n\r\n"[..]).unwrap();
+        assert_eq!(request.header("authorization"), None);
+    }
+}

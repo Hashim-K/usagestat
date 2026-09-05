@@ -6,10 +6,11 @@ bin_dir="${HOME}/.local/bin"
 dev_bin="${bin_dir}/usagestat-dev"
 plugin_dir="${HOME}/.local/share/usagestat-dev/plugins"
 
-cargo build --release -p usagestat-cli --manifest-path "${repo_root}/Cargo.toml"
+cargo build --release -p usagestat-cli -p usagestat-daemon --manifest-path "${repo_root}/Cargo.toml"
 
 mkdir -p "${bin_dir}"
 install -m 0755 "${repo_root}/target/release/usagestat" "${dev_bin}"
+install -m 0755 "${repo_root}/target/release/usagestatd" "${bin_dir}/usagestatd-dev"
 mkdir -p "${plugin_dir}"
 find "${plugin_dir}" -name icon-color.svg -delete
 cp -a "${repo_root}/plugins/." "${plugin_dir}/"

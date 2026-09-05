@@ -140,7 +140,8 @@ The CLI crate has `cargo-deb` metadata for generating a local `.deb`:
 
 ```bash
 cargo install cargo-deb
-cargo deb -p usagestat-cli
+cargo build --release --locked -p usagestat-cli -p usagestat-daemon
+cargo deb -p usagestat-cli --no-build
 ```
 
 Launchpad PPAs require signed Debian source packages, not just binary `.deb`

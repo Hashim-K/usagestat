@@ -23,9 +23,11 @@ docker run --rm -i \
   bash -lc '
     set -euo pipefail
     export CARGO_TARGET_DIR=/tmp/usagestat-target
-    cargo deb -p usagestat-cli --output /tmp/usagestat.deb
+    cargo build --release --locked -p usagestat-cli -p usagestat-daemon
+    cargo deb -p usagestat-cli --no-build --output /tmp/usagestat.deb
     dpkg -i /tmp/usagestat.deb
     usagestat --version
+    usagestatd --help >/dev/null
     (cd /tmp && usagestat --json list --provider codex | tee /tmp/usagestat-providers.json)
     grep -q "\"id\": \"codex\"" /tmp/usagestat-providers.json
     usagestat test https

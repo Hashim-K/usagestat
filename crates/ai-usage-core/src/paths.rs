@@ -6,7 +6,7 @@ fn app_dir_name() -> &'static str {
     if std::env::current_exe()
         .ok()
         .and_then(|path| path.file_name().map(|name| name.to_owned()))
-        .is_some_and(|name| name == "usagestat-dev")
+        .is_some_and(|name| name == "usagestat-dev" || name == "usagestatd-dev")
     {
         "usagestat-dev"
     } else {

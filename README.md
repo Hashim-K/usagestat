@@ -113,6 +113,25 @@ HTTP endpoints currently implemented:
 - `GET /v1/providers`
 - `GET /v1/usage`
 - `GET /v1/usage/:providerId`
+- `GET /v0/management/quota-scheduler/status` (opt-in, management key required)
+
+To use this backend in **T3 Code → Usage → Limits**, enable the CLIProxyAPI
+compatibility endpoint and add the daemon as a usage hub. See the
+[T3 Code setup guide](docs/t3-code.md) for key configuration and supported quotas.
+
+Linux users can opt into startup at login with `usagestat daemon enable` after
+installing both `usagestat` and `usagestatd`. This starts the dashboard and native
+API at `http://127.0.0.1:6736`. Use `usagestat daemon status` to check it and
+`usagestat daemon disable` to stop it and turn autostart off.
+`usagestat daemon t3 auto` exposes the T3 compatibility endpoint whenever the
+daemon runs; `usagestat daemon t3 off` keeps it disabled. Plain `daemon enable`
+remembers that mode, including after stopping the daemon. `usagestat daemon key`
+prints the management key for T3's Add hub dialog. Status shows the saved mode
+and whether the bridge is currently available.
+
+Open the dashboard with `usagestat dashboard`, or print its link with
+`usagestat dashboard --url` for use over SSH. The command uses the daemon's
+configured address and gives startup guidance if it is not responding.
 
 ## Plugin Host API
 

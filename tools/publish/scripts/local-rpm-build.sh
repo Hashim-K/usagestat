@@ -55,6 +55,7 @@ docker run --rm -i \
       packaging/rpm/usagestat.spec
     dnf install -y "$topdir"/RPMS/*/usagestat-"${USAGESTAT_VERSION}"-*.rpm
     usagestat --version
+    usagestatd --help >/dev/null
     (cd /tmp && usagestat --json list --provider codex | tee /tmp/usagestat-providers.json)
     grep -q "\"id\": \"codex\"" /tmp/usagestat-providers.json
     usagestat test https

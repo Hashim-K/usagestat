@@ -10,7 +10,7 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value as JsonValue, json};
 use std::collections::HashMap;
-use std::io::{BufRead, Read, Write};
+use std::io::{BufRead, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,6 +18,9 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use usagestat_plugins::{discover_providers, probe_provider};
+
+mod cliproxy;
+mod http_request;
 
 #[derive(Debug, Parser)]
 #[command(name = "usagestatd")]
@@ -34,6 +37,11 @@ struct Cli {
 
     #[arg(long = "plugin-dir", value_name = "DIR")]
     plugin_dirs: Vec<PathBuf>,
+
+    /// Enable the T3 Code / CLIProxyAPI quota endpoint using a key file.
+    /// Alternatively, set USAGESTAT_MANAGEMENT_KEY.
+    #[arg(long, value_name = "PATH")]
+    management_key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
@@ -45,6 +53,7 @@ struct AppState {
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
+    let management = cliproxy::ManagementApi::load(cli.management_key_file.as_deref())?;
     let config_path = cli.config.clone().unwrap_or_else(paths::config_file);
     let config = AppConfig::load_optional(&config_path)
         .with_context(|| format!("load config {}", config_path.display()))?;
@@ -70,7 +79,7 @@ fn main() -> Result<()> {
         history_path,
         refresh_sec,
     );
-    serve(&cli.bind, state, refresh_flag)
+    serve(&cli.bind, state, refresh_flag, Arc::new(management))
 }
 
 fn start_poller(
@@ -125,16 +134,22 @@ fn start_poller(
     });
 }
 
-fn serve(bind: &str, state: Arc<Mutex<AppState>>, refresh_flag: Arc<AtomicBool>) -> Result<()> {
+fn serve(
+    bind: &str,
+    state: Arc<Mutex<AppState>>,
+    refresh_flag: Arc<AtomicBool>,
+    management: Arc<cliproxy::ManagementApi>,
+) -> Result<()> {
     let listener = TcpListener::bind(bind)?;
     log::info!("listening on http://{bind}");
 
     for stream in listener.incoming() {
         let state = Arc::clone(&state);
         let flag = Arc::clone(&refresh_flag);
+        let management = Arc::clone(&management);
         match stream {
             Ok(stream) => {
-                thread::spawn(move || handle_connection(stream, state, flag));
+                thread::spawn(move || handle_connection(stream, state, flag, management));
             }
             Err(e) => log::warn!("accept failed: {e}"),
         }
@@ -147,24 +162,16 @@ fn handle_connection(
     mut stream: TcpStream,
     state: Arc<Mutex<AppState>>,
     refresh_flag: Arc<AtomicBool>,
+    management: Arc<cliproxy::ManagementApi>,
 ) {
-    let mut buf = [0_u8; 4096];
-    let Ok(n) = stream.read(&mut buf) else {
-        return;
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+    let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let response = match http_request::read_request(&mut stream) {
+        Ok(request) => management
+            .route(&request, &state)
+            .unwrap_or_else(|| route(&request.method, &request.path, &state, &refresh_flag)),
+        Err(_) => response_json(400, "Bad Request", r#"{"error":"invalid_request"}"#),
     };
-    let request = String::from_utf8_lossy(&buf[..n]);
-    let first_line = request.lines().next().unwrap_or("");
-    let mut parts = first_line.split_whitespace();
-    let method = parts.next().unwrap_or("");
-    let raw_path = parts.next().unwrap_or("/");
-    let path = raw_path
-        .split('?')
-        .next()
-        .unwrap_or(raw_path)
-        .trim_end_matches('/');
-    let path = if path.is_empty() { "/" } else { path };
-
-    let response = route(method, path, &state, &refresh_flag);
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
 }
@@ -278,7 +285,7 @@ fn response_json(status: u16, reason: &str, body: &str) -> String {
          Content-Type: application/json; charset=utf-8\r\n\
          Access-Control-Allow-Origin: *\r\n\
          Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-         Access-Control-Allow-Headers: Content-Type\r\n\
+         Access-Control-Allow-Headers: Content-Type, Authorization, X-Management-Key\r\n\
          Content-Length: {}\r\n\r\n{body}",
         body.len()
     )
@@ -956,7 +963,7 @@ fn response_no_content() -> String {
      Connection: close\r\n\
      Access-Control-Allow-Origin: *\r\n\
      Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n\
-     Access-Control-Allow-Headers: Content-Type\r\n\r\n"
+     Access-Control-Allow-Headers: Content-Type, Authorization, X-Management-Key\r\n\r\n"
         .to_string()
 }
 

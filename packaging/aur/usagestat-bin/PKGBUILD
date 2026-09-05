@@ -15,6 +15,9 @@ sha256sums_x86_64=("50aa23ee61a3a19e38ef63d253d1ac7228c511f615ca0f9197553bc3cfc0
 
 package() {
   install -Dm755 "${srcdir}/usagestat" "${pkgdir}/usr/bin/usagestat"
+  if [[ -f "${srcdir}/usagestatd" ]]; then
+    install -Dm755 "${srcdir}/usagestatd" "${pkgdir}/usr/bin/usagestatd"
+  fi
   install -Dm644 "${srcdir}/LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
   cp -a "${srcdir}/plugins" "${pkgdir}/usr/share/usagestat/"
 }

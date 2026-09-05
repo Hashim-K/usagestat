@@ -1,5 +1,7 @@
 mod auth_cookies;
 mod batch_probe;
+mod daemon;
+mod dashboard;
 mod history;
 
 use anyhow::{Context, Result};
@@ -70,6 +72,20 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Open the usage dashboard in your default browser
+    Dashboard {
+        /// Print the dashboard URL without opening a browser
+        #[arg(long)]
+        url: bool,
+        /// Daemon address (defaults to the managed service address, then 127.0.0.1:6736)
+        #[arg(long, value_name = "ADDRESS:PORT")]
+        bind: Option<std::net::SocketAddr>,
+    },
+    /// Manage the optional background daemon and startup at login (Linux/systemd)
+    Daemon {
+        #[command(subcommand)]
+        command: daemon::DaemonCommand,
+    },
     /// Probe one or more providers and show live usage
     Usage {
         provider_ids: Vec<String>,
@@ -382,6 +398,12 @@ fn main() -> Result<()> {
         &cli.no_color,
     );
     let config_path = cli.config.clone().unwrap_or_else(paths::config_file);
+    if let Some(Command::Dashboard { url, bind }) = &cli.command {
+        return dashboard::run(*url, *bind, json);
+    }
+    if let Some(Command::Daemon { command }) = &cli.command {
+        return daemon::run(command, &config_path, &cli.plugin_dirs, json);
+    }
     let config = AppConfig::load_optional(&config_path)
         .with_context(|| format!("load config {}", config_path.display()))?;
     let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs);
@@ -404,6 +426,9 @@ fn main() -> Result<()> {
         augment_debug: false,
         no_credits: false,
     }) {
+        Command::Daemon { .. } | Command::Dashboard { .. } => {
+            unreachable!("daemon and dashboard commands are handled before provider discovery")
+        }
         Command::Usage {
             provider_ids,
             provider,
@@ -618,6 +643,8 @@ fn effective_args() -> Vec<OsString> {
             matches!(
                 s,
                 "usage"
+                    | "daemon"
+                    | "dashboard"
                     | "list"
                     | "probe"
                     | "status"
