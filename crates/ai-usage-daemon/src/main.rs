@@ -4,6 +4,7 @@ use usagestat_core::{
 };
 
 const DASHBOARD_HTML: &str = include_str!("dashboard.html");
+const DASHBOARD_TRENDS_JS: &str = include_str!("dashboard-trends.js");
 use anyhow::{Context, Result};
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, TimeZone, Utc};
 use clap::Parser;
@@ -206,6 +207,15 @@ fn route(
 
     if path == "/dashboard" || path == "/" {
         return response_html(200, "OK", DASHBOARD_HTML);
+    }
+
+    if path == "/dashboard/trends.js" {
+        return response_text(
+            200,
+            "OK",
+            "text/javascript; charset=utf-8",
+            DASHBOARD_TRENDS_JS,
+        );
     }
 
     if path == "/v1/providers" {
@@ -949,10 +959,15 @@ fn add_event_to_block(row: &mut BlockAggregate, event: &LocalUsageEvent) {
 }
 
 fn response_html(status: u16, reason: &str, body: &str) -> String {
+    response_text(status, reason, "text/html; charset=utf-8", body)
+}
+
+fn response_text(status: u16, reason: &str, content_type: &str, body: &str) -> String {
     format!(
         "HTTP/1.1 {status} {reason}\r\n\
          Connection: close\r\n\
-         Content-Type: text/html; charset=utf-8\r\n\
+         Content-Type: {content_type}\r\n\
+         Cache-Control: no-store\r\n\
          Content-Length: {}\r\n\r\n{body}",
         body.len()
     )

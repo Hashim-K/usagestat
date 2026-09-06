@@ -234,6 +234,14 @@ cargo run -p usagestat-daemon -- --config ./config.toml --refresh-sec 30
 
 </details>
 
+## Source checkout features
+
+The dedicated **History** tab is available in the source/dev build and is pending
+the next package release. History adds provider/date filters, daily/weekly/monthly
+charts, previous-period comparisons, and CSV export of saved daily reports.
+Quota-only providers retain their snapshot charts. See
+[CLI and dashboard documentation](docs/cli.md).
+
 ## Development
 
 Build and install a separate dev profile with a current stable Rust toolchain

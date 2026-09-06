@@ -451,6 +451,21 @@ header{
 .model-bar{height:5px;background:var(--s2);border-radius:999px;overflow:hidden}
 .model-bar div{height:100%;border-radius:999px;background:var(--blue)}
 .small-note{font:11px var(--mono);color:var(--su);margin-top:10px}
+.trends-controls{display:flex;gap:14px;flex-wrap:wrap;align-items:end;margin:18px 0}
+.trends-controls label{display:flex;flex-direction:column;gap:6px;font:12px var(--sans);color:var(--mu)}
+.trends-controls select,.trends-controls input,.trends-export{background:var(--s1);color:var(--tx);border:1px solid var(--bd2);border-radius:6px;padding:9px;font:12px var(--sans);min-height:36px;color-scheme:dark}
+.trends-export{cursor:pointer;margin-left:auto}
+.trends-export:disabled{opacity:.5;cursor:default}
+.trends-kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:18px 0}
+.trends-kpis .insight-value{margin-bottom:8px}
+.trends-change{font:11px var(--mono);color:var(--mu);margin-top:9px;line-height:1.5}
+.trends-sub{color:var(--mu);font:12px/1.7 var(--sans)}
+.trends-table-wrap{overflow-x:auto}
+.trends-chart{margin-top:16px}
+.trends-chart svg{display:block;width:100%;min-height:180px;max-height:320px}
+.trends-chart rect:hover{opacity:.7}
+.trends-empty{padding:36px 16px;text-align:center;color:var(--mu);line-height:1.8}
+@media(max-width:720px){.trends-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.trends-controls label{flex:1;min-width:120px}.trends-export{margin-left:0}.trends-chart{overflow-x:auto}.trends-chart svg{min-width:560px}}
 </style>
 </head>
 <body>
@@ -464,6 +479,7 @@ header{
     </div>
     <nav id="tabs" class="tab-bar">
       <button class="tab active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+      <button class="tab" data-tab="history" onclick="switchTab('history')">History</button>
     </nav>
     <div class="hend">
       <div id="conn" class="conn"><span class="cdot"></span><span id="connTxt">connecting</span></div>
@@ -494,15 +510,18 @@ header{
         <div class="sk-card"></div><div class="sk-card"></div><div class="sk-card"></div>
       </div>
     </div>
+    <div id="panel-history" class="panel"></div>
   </div>
 
 </div>
+<script src="/dashboard/trends.js"></script>
 <script>
 // ── state ─────────────────────────────────────────────────────────────────────
 const S = {
   snapshots:[],
   providers:[],
   dailyRows:[],
+  dailyError:false,
   costs:{},
   histories:{},
   active:'overview',
@@ -533,12 +552,14 @@ async function load(){
     const [usage,providers,daily] = await Promise.all([
       fetch('/v1/usage').then(r=>r.json()),
       fetch('/v1/providers').then(r=>r.json()),
-      fetch('/v1/history/daily').then(r=>r.json()).catch(()=>({ daily:[] })),
+      fetch('/v1/history/daily').then(r=>r.ok?r.json():null).catch(()=>null),
     ]);
     S.snapshots = usage;
     S.providers = providers.filter(p=>p.enabled);
     S.dailyRows = normalizeDailyRows(daily);
+    S.dailyError = !daily || !!daily.error || !(Array.isArray(daily) || Array.isArray(daily.daily));
     S.histories = {};
+    S.costs = {};
     S.online = true; S.loadedAt = Date.now(); updAgo();
     setOnline(true);
     buildTabs();
@@ -600,6 +621,7 @@ function switchTab(id){
 
 function renderActive(){
   if(S.active==='overview') renderOverview();
+  else if(S.active==='history') renderTrends();
   else renderProvider(S.active);
 }
 
@@ -1067,8 +1089,137 @@ function deltaBadge(value){
   return `<span class="delta ${cls}">${sign}${value}%</span>`;
 }
 
-function exportDailyCsv(){
-  const rows = S.dailyRows.slice().sort((a,b)=>b.date.localeCompare(a.date) || a.providerId.localeCompare(b.providerId));
+// ── saved daily history and trends ────────────────────────────────────────────
+function trendsOptions(){
+  const prefs = S.prefs.trends || {};
+  return {
+    provider: typeof prefs.provider==='string' ? prefs.provider : '',
+    range: ['7','30','90','365','all','custom'].includes(prefs.range) ? prefs.range : '30',
+    group: ['day','week','month'].includes(prefs.group) ? prefs.group : 'day',
+    metric: prefs.metric==='cost' ? 'cost' : 'totalTokens',
+    start: prefs.start || dateKey(addDays(todayUtcDate(),-29)),
+    end: prefs.end || dateKey(todayUtcDate()),
+  };
+}
+
+function trendChange(current, previous, field){
+  const delta = UsageTrends.change(current[field], previous[field], current.rows, previous.rows);
+  if(delta.kind==='unavailable') return 'Comparison unavailable';
+  if(delta.kind==='fromZero') return 'Up from a recorded zero';
+  return `${delta.percent>0?'+':''}${delta.percent.toFixed(1)}% vs previous period`;
+}
+
+function trendKpi(value, label, note){
+  return `<div class="insight"><div class="insight-value">${esc(value)}</div><div class="insight-label">${esc(label)}</div><div class="trends-change">${esc(note)}</div></div>`;
+}
+
+function renderTrends(){
+  const panel = document.getElementById('panel-history');
+  const options = trendsOptions();
+  const model = UsageTrends.summarize(S.dailyRows, options);
+  // Include saved providers even after they have been disabled or removed.
+  const providers = new Map(S.providers.map(p=>[p.id.toLowerCase(),p.name||p.id]));
+  for(const r of S.dailyRows) providers.set(r.providerId.toLowerCase(), r.displayName||r.providerId);
+  if(options.provider && !providers.has(options.provider.toLowerCase())) providers.set(options.provider, options.provider);
+  let html = `<div class="history-box"><div class="box-title">Usage history & trends</div>`;
+  html+=`<div class="trends-sub">Explore saved daily usage across providers. Cost is reported or API-equivalent cost, where available.</div>`;
+  html+=`<div class="trends-controls">`;
+  html+=`<label>Provider<select id="trends-provider"><option value=""${!options.provider?' selected':''}>All providers</option>${[...providers].sort((a,b)=>a[1].localeCompare(b[1])).map(([id,name])=>selectOption(id,name,options.provider.toLowerCase())).join('')}</select></label>`;
+  html+=`<label>Period<select id="trends-range">${[['7','Last 7 days'],['30','Last 30 days'],['90','Last 90 days'],['365','Last year'],['all','All saved history'],['custom','Custom dates']].map(([v,l])=>selectOption(v,l,options.range)).join('')}</select></label>`;
+  if(options.range==='custom'){
+    const max = dateKey(todayUtcDate());
+    html+=`<label>From<input id="trends-start" type="date" value="${esc(options.start)}" max="${max}"></label><label>Through<input id="trends-end" type="date" value="${esc(options.end)}" max="${max}"></label>`;
+  }
+  html+=`<label>Group by<select id="trends-group">${[['day','Day'],['week','Week'],['month','Month']].map(([v,l])=>selectOption(v,l,options.group)).join('')}</select></label>`;
+  html+=`<label>Chart<select id="trends-metric">${selectOption('totalTokens','Tokens',options.metric)}${selectOption('cost','Cost (USD)',options.metric)}</select></label>`;
+  html+=`<button class="trends-export" id="trends-export" ${!model.rows?.length||S.dailyError?'disabled':''}>Export selected CSV</button></div>`;
+  if(model.error){
+    html+=`<div class="trends-empty" role="alert">${esc(model.error)}</div>`;
+  } else if(S.dailyError){
+    html+=`<div class="trends-empty" role="alert">Could not load saved daily history. Try Refresh to load it again.</div>`;
+  } else {
+    const { range, current, previous } = model;
+    html+=`<div class="trends-sub">${range.start} → ${range.end} · ${range.days} calendar days · UTC${range.end===dateKey(todayUtcDate())?' · Today is partial':''}<br>Previous period: ${range.previousStart} → ${range.previousEnd}</div>`;
+    if(!current.rows){
+      html+=`<div class="trends-empty"><strong>No saved daily usage in this range</strong><br>Try another period or provider. Daily totals are saved when a supported provider reads local usage logs.<br>Run <code>usagestat usage</code> or keep the daemon running to collect available reports.<br>Providers that report only quotas have snapshot charts in their provider tab.</div>`;
+    } else {
+      html+=`<div class="trends-kpis">`;
+      html+=trendKpi(fmtTok(current.totalTokens),'recorded tokens',trendChange(current,previous,'totalTokens'));
+      html+=trendKpi('$'+current.cost.toFixed(2),'recorded cost',trendChange(current,previous,'cost'));
+      html+=trendKpi(fmtTok(current.totalTokens/current.recordedDays),'tokens per recorded day',`${current.activeDays} days with recorded activity`);
+      html+=trendKpi(`${current.recordedDays}/${range.days}`,'days with records',`${current.providers} providers · previous: ${previous.recordedDays}/${range.days} days`);
+      html+=`</div><div class="trends-sub">Comparisons use recorded totals; coverage may differ between periods and providers. Gaps mean no saved record. A zero cost can also mean pricing was unavailable.</div>`;
+      html+=`<div class="trends-chart">${trendsChart(model.buckets,options.metric)}</div>`;
+      html+=`<div class="small-note">${options.group==='week'?'Weeks start on Monday. ':''}Edge buckets include only dates in the selected range. Hover a bar for its total and recorded days.</div>`;
+    }
+    if(model.providers.length){
+      html+=`<div class="box-title" style="margin-top:26px">By provider</div><div class="trends-table-wrap"><table class="usage-table"><thead><tr><th>Provider</th><th>Tokens</th><th>Token change</th><th>Cost</th><th>Cost change</th><th>Days recorded</th></tr></thead><tbody>`;
+      for(const p of model.providers){
+        html+=`<tr><td>${esc(p.displayName)}</td><td>${p.current.rows?fmtTok(p.current.totalTokens):'—'}</td><td>${esc(trendChange(p.current,p.previous,'totalTokens'))}</td><td>${p.current.rows?'$'+p.current.cost.toFixed(2):'—'}</td><td>${esc(trendChange(p.current,p.previous,'cost'))}</td><td>${p.current.recordedDays}/${range.days}</td></tr>`;
+      }
+      html+=`</tbody></table></div>`;
+    }
+    if(current.rows){
+      html+=`<details style="margin-top:22px"><summary>Period details</summary><div class="trends-table-wrap"><table class="usage-table"><thead><tr><th>Dates</th><th>Tokens</th><th>Cache read</th><th>Cost</th><th>Days recorded</th></tr></thead><tbody>`;
+      for(const b of model.buckets.slice(-60).reverse()){
+        html+=`<tr><td>${b.start===b.end?b.start:b.start+' → '+b.end}</td><td>${b.rows?fmtTok(b.totalTokens):'No record'}</td><td>${b.rows?fmtTok(b.cacheReadTokens):'—'}</td><td>${b.rows?'$'+b.cost.toFixed(2):'—'}</td><td>${b.recordedDays}/${b.days}</td></tr>`;
+      }
+      html+=`</tbody></table></div>${model.buckets.length>60?'<div class="small-note">Showing the latest 60 buckets. Export includes every selected daily row.</div>':''}</details>`;
+    }
+  }
+  panel.innerHTML = html + '</div>';
+  for(const field of ['provider','range','start','end','group','metric']){
+    panel.querySelector('#trends-'+field)?.addEventListener('change', e=>{
+      const next = { ...options, [field]:e.target.value };
+      if(field==='range' && next.range==='custom' && model.range){
+        next.start = model.range.start; next.end = model.range.end;
+      }
+      S.prefs.trends = next;
+      savePrefs();
+      renderTrends();
+    });
+  }
+  panel.querySelector('#trends-export')?.addEventListener('click',()=>{
+    if(model.rows?.length) exportDailyCsv(model.rows, `usagestat-history-${model.range.start}-${model.range.end}.csv`);
+  });
+}
+
+function trendsChart(buckets, metric){
+  // Keep large imports readable without dropping any totals from the chart.
+  const stride = Math.max(1,Math.ceil(buckets.length/180));
+  const points = [];
+  for(let i=0;i<buckets.length;i+=stride){
+    const group = buckets.slice(i,i+stride);
+    points.push({ start:group[0].start,end:group[group.length-1].end,
+      value:sum(group,metric),days:sum(group,'days'),recordedDays:sum(group,'recordedDays') });
+  }
+  const W=1000,H=270,L=70,R=18,T=18,B=38,CW=W-L-R,CH=H-T-B;
+  const max = Math.max(1,...points.map(p=>p.value));
+  const step = CW/Math.max(1,points.length), width = Math.max(.5,step*.72);
+  const fmt = v=>metric==='cost'?'$'+v.toFixed(2):fmtTok(v);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Recorded ${metric==='cost'?'cost':'tokens'} by period; gaps have no saved record"><title>Recorded ${metric==='cost'?'cost':'tokens'} by period. Totals are also available in Period details.</title>`;
+  for(let i=0;i<=4;i++){
+    const y=T+CH*(1-i/4);
+    svg+=`<line x1="${L}" y1="${y}" x2="${W-R}" y2="${y}" stroke="var(--bd)"/><text x="${L-10}" y="${y+4}" text-anchor="end" fill="var(--mu)" font-size="11">${esc(fmt(max*i/4))}</text>`;
+  }
+  points.forEach((p,i)=>{
+    const x=L+step*(i+.5),h=p.recordedDays?Math.max(2,CH*p.value/max):2;
+    const label = `${p.start}${p.end!==p.start?' → '+p.end:''}: ${p.recordedDays?fmt(p.value):'No record'} · ${p.recordedDays}/${p.days} days recorded`;
+    if(p.recordedDays){
+      svg+=`<rect x="${x-width/2}" y="${T+CH-h}" width="${width}" height="${h}" rx="2" fill="${metric==='cost'?'var(--teal)':'var(--blue)'}"><title>${esc(label)}</title></rect>`;
+    }else{
+      svg+=`<rect x="${x-width/2}" y="${T+CH-2}" width="${width}" height="2" fill="none" stroke="var(--mu)" stroke-dasharray="2 2"><title>${esc(label)}</title></rect>`;
+    }
+    if(i%Math.max(1,Math.ceil(points.length/7))===0 || i===points.length-1){
+      svg+=`<text x="${x}" y="${H-12}" text-anchor="middle" fill="var(--mu)" font-size="10">${p.start.slice(5)}</text>`;
+    }
+  });
+  return svg+'</svg>'+(stride>1?`<div class="small-note">Each bar combines up to ${stride} adjacent buckets. Export retains daily detail.</div>`:'');
+}
+
+function exportDailyCsv(selectedRows = S.dailyRows, filename){
+  // Event listeners pass a MouseEvent; explicit arrays export a filtered view.
+  const rows = (Array.isArray(selectedRows)?selectedRows:S.dailyRows).slice().sort((a,b)=>b.date.localeCompare(a.date) || a.providerId.localeCompare(b.providerId));
   const lines = [
     ['date','provider_id','display_name','source','input_tokens','output_tokens','reasoning_tokens','cache_write_tokens','cache_read_tokens','total_tokens','cost_usd','ingested_at'].join(',')
   ];
@@ -1084,11 +1235,11 @@ function exportDailyCsv(){
       r.cacheCreationTokens,
       r.cacheReadTokens,
       r.totalTokens,
-      r.cost ? r.cost.toFixed(6) : '',
+      r.cost.toFixed(6),
       r.ingestedAt || '',
     ].map(csvCell).join(','));
   }
-  downloadText(`usagestat-daily-${dateKey(todayUtcDate())}.csv`, lines.join('\r\n'), 'text/csv;charset=utf-8');
+  downloadText(filename || `usagestat-daily-${dateKey(todayUtcDate())}.csv`, lines.join('\r\n'), 'text/csv;charset=utf-8');
 }
 
 function exportQuotaCsv(){
@@ -1303,15 +1454,13 @@ function buildUsageAnalytics(id, snap, rawHistory, reports){
     .sort((a,b)=>new Date(a.resetsAt)-new Date(b.resetsAt))[0];
   const exhausted = percent.filter(m=>pct(m)>=95).length;
   const averageUsage = percent.length ? percent.reduce((a,m)=>a+pct(m),0)/percent.length : null;
-  const history = normalizeHistory(rawHistory).filter(r=>r.providerId===snap.providerId).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
   const dailyRows = reportRows(reports?.daily, 'daily');
   const weeklyRows = reportRows(reports?.weekly, 'weekly');
   const monthlyRows = reportRows(reports?.monthly, 'monthly');
   const sessionRows = reportRows(reports?.session, 'session');
   const blockRows = reportRows(reports?.blocks, 'blocks');
-  const fallbackDaily = dailyRows.length ? dailyRows : historyDailyRows(history);
-  const basisRows = fallbackDaily.length ? fallbackDaily : history;
-  const totals = usageTotals(basisRows);
+  const fallbackDaily = dailyRows.length ? dailyRows : S.dailyRows.filter(r=>r.providerId.toLowerCase()===id.toLowerCase());
+  const totals = usageTotals(fallbackDaily);
   const today = fallbackDaily.find(r=>rowDate(r)===new Date().toISOString().slice(0,10));
   const activeDays = fallbackDaily.filter(r=>rowTotalTokens(r)>0 || rowCost(r)>0).length;
   const modelBasis = dailyRows.length ? dailyRows :
@@ -1319,9 +1468,9 @@ function buildUsageAnalytics(id, snap, rawHistory, reports){
     weeklyRows.length ? weeklyRows :
     monthlyRows.length ? monthlyRows :
     blockRows;
-  const models = aggregateReportModels(modelBasis, history);
+  const models = aggregateReportModels(modelBasis);
   const topModel = models[0];
-  const sourceLabel = reports && !reports.daily?.error ? 'native local logs' : history.length ? 'daemon history' : 'live snapshot';
+  const sourceLabel = dailyRows.length ? 'native local logs' : fallbackDaily.length ? 'saved daily reports' : 'daily reports unavailable';
 
   let html = `<div class="stats-grid">`;
   html+=statCard(fmtTok(rowTotalTokens(today||{})), 'today tokens');
@@ -1417,23 +1566,19 @@ function renderHistorySection(id, raw, snap, reports){
   const recent = lastWindow(records, 30);
   const latest = recent[recent.length-1] || records[records.length-1];
   const first = recent[0] || records[0];
-  const totalInput = sum(recent, 'inputTokens');
-  const totalOutput = sum(recent, 'outputTokens');
-  const totalCacheRead = sum(recent, 'cacheReadTokens');
-  const totalCacheCreate = sum(recent, 'cacheCreationTokens');
-  const totalCost = sum(recent, 'cost');
   const activeDays = new Set(recent.map(r=>String(r.ts).slice(0,10))).size;
-  const localDaily = reportRows(reports?.daily, 'daily').map(normalizeCostRow).filter(r=>r.date);
+  const reportDaily = reportRows(reports?.daily, 'daily');
+  const localDaily = (reportDaily.length ? reportDaily : S.dailyRows.filter(r=>r.providerId.toLowerCase()===id.toLowerCase())).map(normalizeCostRow).filter(r=>r.date);
   const summaryRows = localDaily.length ? calendarWindow(localDaily, 30) : [];
   const summaryTotals = summaryRows.length ? usageTotals(summaryRows) : null;
   const summaryActiveDays = summaryRows.length ? summaryRows.filter(r=>rowCost(r)>0 || rowTotalTokens(r)>0).length : activeDays;
-  const summaryInput = summaryTotals ? summaryTotals.inputTokens : totalInput;
-  const summaryOutput = summaryTotals ? summaryTotals.outputTokens : totalOutput;
-  const summaryCacheRead = summaryTotals ? summaryTotals.cacheReadTokens : totalCacheRead;
-  const summaryCacheCreate = summaryTotals ? summaryTotals.cacheCreationTokens : totalCacheCreate;
-  const summaryCost = summaryTotals ? summaryTotals.cost : totalCost;
+  const summaryInput = summaryTotals ? summaryTotals.inputTokens : latest.inputTokens;
+  const summaryOutput = summaryTotals ? summaryTotals.outputTokens : latest.outputTokens;
+  const summaryCacheRead = summaryTotals ? summaryTotals.cacheReadTokens : latest.cacheReadTokens;
+  const summaryCacheCreate = summaryTotals ? summaryTotals.cacheCreationTokens : latest.cacheCreationTokens;
+  const summaryCost = summaryTotals ? summaryTotals.cost : latest.cost;
 
-  let html = `<div class="history-grid">`;
+  let html = `<div class="trends-sub" style="margin-bottom:16px">Charts show polled snapshot values. Grouped views show peak quota and the last reported counters in each bucket. For daily totals and period comparisons, open History.</div><div class="history-grid">`;
   html+=`<div>`;
   html+=`<div class="history-controls">`;
   html+=`<div class="history-tabs" id="history-tabs-${id}">`;
@@ -1450,10 +1595,10 @@ function renderHistorySection(id, raw, snap, reports){
   html+=`<div><div class="insight-grid">`;
   html+=insight(`${fmtPct(latest.primaryPercent)}`, 'latest usage');
   html+=insight(fmtPct((latest.primaryPercent||0)-(first.primaryPercent||0), true), 'window change');
-  html+=insight(fmtTok(summaryInput), 'input tokens');
-  html+=insight(fmtTok(summaryOutput), 'output tokens');
-  html+=insight(summaryCost>0?`$${summaryCost.toFixed(2)}`:'—', 'reported cost');
-  html+=insight(summaryRows.length?`${summaryActiveDays}/${summaryRows.length}`:String(activeDays), 'active days');
+  html+=insight(fmtTok(summaryInput), summaryTotals?'30d input tokens':'latest input tokens');
+  html+=insight(fmtTok(summaryOutput), summaryTotals?'30d output tokens':'latest output tokens');
+  html+=insight(summaryCost>0?`$${summaryCost.toFixed(2)}`:'—', summaryTotals?'30d recorded cost':'latest reported cost');
+  html+=insight(summaryRows.length?`${summaryActiveDays}/${summaryRows.length}`:String(activeDays), summaryTotals?'30d active days':'days sampled');
   html+=`</div>`;
   html+=`<div style="margin-top:14px">`;
   html+=seriesRow('Input', summaryInput, '#58a6ff', fmtTok);
@@ -1492,24 +1637,14 @@ function renderCostSection(id, raw, history){
   if(Array.isArray(raw)) entry = raw[0];
   else if(raw && !raw.error) entry = raw;
 
-  if(!entry || entry.error){
-    const records = normalizeHistory(history).filter(r=>r.providerId===id && Number(r.cost)>0);
-    if(records.length){
-      const daily = historyToDaily(records);
-      const totalCost = sum(records, 'cost');
-      const totalTok = sum(records, 'inputTokens') + sum(records, 'outputTokens') + sum(records, 'cacheReadTokens') + sum(records, 'cacheCreationTokens');
-      let html = `<div class="cost-stats">`;
-      html+=`<div class="cstat"><div class="cstat-val">$${totalCost.toFixed(2)}</div><div class="cstat-lbl">history total</div></div>`;
-      html+=`<div class="cstat"><div class="cstat-val">${fmtTok(totalTok)}</div><div class="cstat-lbl">tracked tokens</div></div>`;
-      html+=`<div class="cstat"><div class="cstat-val">${daily.length}</div><div class="cstat-lbl">sampled days</div></div>`;
-      html+=`</div><div class="chart-wrap" id="chart-${id}"></div>`;
-      box.insertAdjacentHTML('beforeend', html);
-      setupCostRange(box, id, daily);
-      return;
-    }
+  if(!entry || entry.error || !entry.daily?.length){
+    const saved = S.dailyRows.filter(r=>r.providerId.toLowerCase()===id.toLowerCase());
+    if(saved.length) entry = { daily:saved };
+  }
+  if(!entry || entry.error || !entry.daily?.length){
     const msg = box.querySelector('.cost-unavail') || document.createElement('div');
     msg.className='cost-unavail';
-    msg.innerHTML=`<strong>Cost history unavailable</strong>This provider has not reported cost data yet. Keep the daemon running, or probe with <code style="font-size:12px;color:var(--teal)">usagestat usage --save</code>, to build local cost history.`;
+    msg.innerHTML=`<strong>Daily cost history unavailable</strong>This provider has no saved daily cost report. Snapshot counters appear in Usage History; they cannot be added together to calculate spend.`;
     if(!box.contains(msg)) box.appendChild(msg);
     return;
   }
@@ -1688,18 +1823,6 @@ function lastWindow(records, days){
   return records.filter(r=>+new Date(r.ts)>=start);
 }
 
-function historyToDaily(records){
-  const map = {};
-  for(const r of records){
-    const day = String(r.ts).slice(0,10);
-    if(!map[day]) map[day] = { date:day, totalCost:0, totalTokens:0, modelBreakdowns:[] };
-    map[day].totalCost += Number(r.cost||0);
-    map[day].totalTokens += Number(r.inputTokens||0) + Number(r.outputTokens||0) +
-      Number(r.cacheReadTokens||0) + Number(r.cacheCreationTokens||0);
-  }
-  return Object.values(map).sort((a,b)=>a.date.localeCompare(b.date));
-}
-
 function normalizeCostRow(row){
   const date = rowDate(row);
   return {
@@ -1834,22 +1957,6 @@ function usageTotals(rows){
   }, {inputTokens:0,outputTokens:0,cacheReadTokens:0,cacheCreationTokens:0,reasoningTokens:0,totalTokens:0,cost:0});
 }
 
-function historyDailyRows(records){
-  const map = new Map();
-  for(const r of records){
-    const date = String(r.ts).slice(0,10);
-    if(!map.has(date)) map.set(date, { date, inputTokens:0, outputTokens:0, cacheReadTokens:0, cacheCreationTokens:0, totalTokens:0, totalCost:0 });
-    const d = map.get(date);
-    d.inputTokens += Number(r.inputTokens)||0;
-    d.outputTokens += Number(r.outputTokens)||0;
-    d.cacheReadTokens += Number(r.cacheReadTokens)||0;
-    d.cacheCreationTokens += Number(r.cacheCreationTokens)||0;
-    d.totalTokens += Number(r.totalTokens)||0;
-    d.totalCost += Number(r.cost)||0;
-  }
-  return Array.from(map.values()).sort((a,b)=>a.date.localeCompare(b.date));
-}
-
 function bucketRows(rows, bucket){
   const map = new Map();
   for(const r of rows){
@@ -1913,7 +2020,7 @@ function renderHeatmap(rows){
   return html;
 }
 
-function aggregateReportModels(rows, history){
+function aggregateReportModels(rows){
   const map = new Map();
   const add = (name,tokens,cost)=>{
     name = String(name||'unknown').trim() || 'unknown';
@@ -1932,9 +2039,6 @@ function aggregateReportModels(rows, history){
     if(Array.isArray(models)) models.forEach(m=>add(m, rowTotalTokens(r)/models.length, rowCost(r)/models.length));
     else if(models && typeof models === 'object') Object.entries(models).forEach(([name,m])=>add(name, rowTotalTokens(m), rowCost(m)));
     else if(models) add(models, rowTotalTokens(r), rowCost(r));
-  }
-  if(!map.size && history.length){
-    for(const r of history) add(r.displayName || r.providerId, rowTotalTokens(r), rowCost(r));
   }
   return Array.from(map.values()).sort((a,b)=>b.tokens-a.tokens || b.cost-a.cost).slice(0,10);
 }
@@ -2000,12 +2104,12 @@ function aggregateHistory(records, bucket){
     const b = map.get(key);
     b._samples++;
     b.primaryPercent = Math.max(b.primaryPercent, Number(r.primaryPercent)||0);
-    b.inputTokens += Number(r.inputTokens)||0;
-    b.outputTokens += Number(r.outputTokens)||0;
-    b.cacheReadTokens += Number(r.cacheReadTokens)||0;
-    b.cacheCreationTokens += Number(r.cacheCreationTokens)||0;
-    b.totalTokens += Number(r.totalTokens)||0;
-    b.cost += Number(r.cost)||0;
+    // These are sampled counters, not usage events. Repeated polls must not
+    // multiply usage; take the latest counter while retaining peak quota.
+    if(!b._latest || new Date(r.ts)>=new Date(b._latest)){
+      for(const field of ['inputTokens','outputTokens','cacheReadTokens','cacheCreationTokens','totalTokens','cost']) b[field] = Number(r[field])||0;
+      b._latest = r.ts;
+    }
     for(const p of (r.progress||[])){
       if(p.percent == null || !isFinite(p.percent)) continue;
       if(!b._quota[p.label]) b._quota[p.label] = { ...p, percent:0, used:0, samples:0 };
@@ -2016,7 +2120,7 @@ function aggregateHistory(records, bucket){
   }
   return Array.from(map.values()).map(b=>{
     b.progress = Object.values(b._quota);
-    delete b._quota; delete b._samples;
+    delete b._quota; delete b._samples; delete b._latest;
     return b;
   }).sort((a,b)=>new Date(a.ts)-new Date(b.ts));
 }

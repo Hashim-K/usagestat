@@ -133,6 +133,28 @@ while the daemon is stopped; `--json` emits `{"dashboardUrl":"..."}`. Both skip
 the browser and health check, so they work over SSH. The dev CLI resolves its
 own service settings with `usagestat-dev dashboard`.
 
+The dashboard's **History** tab shows saved daily token and cost trends across
+providers, including providers that are no longer enabled. Filter by provider,
+choose 7, 30, 90, or 365 days, all saved history, or custom dates, and group the
+chart by day, Monday-based week, or month. **Export selected CSV** downloads the
+daily rows for that provider and date range, regardless of chart grouping.
+
+Totals are compared with the immediately preceding period of the same length.
+Ranges use UTC calendar dates, include both endpoints, and include today's
+partial activity. Recorded-day counts show coverage; missing records are gaps,
+not recorded zero usage. A comparison is unavailable if either period has no
+records. An increase from zero is labeled without inventing a percentage.
+
+Daily reports are saved in `~/.local/share/usagestat/usage_daily.json` (or the
+equivalent XDG data directory) when supported providers read local usage logs.
+Run `usagestat usage` or keep the daemon running to collect available reports.
+Only providers with daily reports contribute to spend and token totals. Costs
+may be API-equivalent estimates; a zero can also mean pricing was unavailable.
+Quota-only providers retain their snapshot charts in the provider tab.
+Repeated polling snapshots are never added together to calculate daily spend
+or token totals. History stays on the daemon's machine; this view does not
+combine records from other servers.
+
 ## Quick Start
 
 List discovered providers:
