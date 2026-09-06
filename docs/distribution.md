@@ -77,6 +77,10 @@ recipes and Debian source packages are retained as workflow artifacts.
 The AUR package targets x86-64. Homebrew supports Linux x86-64 and ARM64. COPR
 builds the project's enabled Fedora targets. The PPA keeps the existing `noble`
 series and `-1ppa1` version scheme, and supports its enabled amd64/arm64 builders.
+Version 1.0.3 uses `-1ppa2` to replace a package rejected for epoch-zero file
+timestamps. The Debian install step sets bundled timestamps from the package
+changelog; the reproducible upstream source archive remains unchanged. Uploads
+and publication checks share the revision in `publication-state.py`.
 As in the existing PPA, its Debian source package wraps the validated release
 binaries and plugins. Both the CLI and daemon are installed. It does not run
 Cargo on Launchpad.

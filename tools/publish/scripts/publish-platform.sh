@@ -121,8 +121,8 @@ PYKEYS
     ;;
   ppa)
     source_dir="$package_dir/usagestat-$version"
-    # Keep the existing PPA series and revision scheme.
-    deb_version="$version-1ppa1"
+    # Use the same package revision for uploads and publication checks.
+    deb_version="$(python3 "$script_dir/publication-state.py" ppa "$version" --print-version)"
     cat > "$source_dir/debian/changelog" <<EOF
 usagestat ($deb_version) noble; urgency=medium
 

@@ -11,6 +11,12 @@ import urllib.parse
 import urllib.request
 
 
+def ppa_version(version):
+    # 1.0.3-1ppa1 built, but Launchpad rejected its epoch-zero file timestamps.
+    revision = 2 if version == '1.0.3' else 1
+    return f'{version}-1ppa{revision}'
+
+
 def get(url):
     with urllib.request.urlopen(url, timeout=30) as response:
         return json.load(response)
@@ -32,9 +38,10 @@ def state(platform, version):
             return 'failed'
         return 'pending'
     archive = 'https://api.launchpad.net/1.0/~hashimkarim/+archive/ubuntu/usagestat'
-    query = urllib.parse.urlencode({'ws.op': 'getPublishedSources', 'source_name': 'usagestat', 'exact_match': 'true', 'version': version + '-1ppa1'})
+    deb_version = ppa_version(version)
+    query = urllib.parse.urlencode({'ws.op': 'getPublishedSources', 'source_name': 'usagestat', 'exact_match': 'true', 'version': deb_version})
     entries = get(archive + '?' + query)['entries']
-    entries = [e for e in entries if e['source_package_version'] == version + '-1ppa1']
+    entries = [e for e in entries if e['source_package_version'] == deb_version]
     if not entries:
         return 'missing'
     if all(e['status'] in {'Deleted', 'Obsolete', 'Superseded'} for e in entries):
@@ -44,8 +51,8 @@ def state(platform, version):
     if any(b['buildstate'] in {'Failed to build', 'Dependency wait', 'Chroot problem', 'Failed to upload', 'Cancelled'} for b in builds):
         raise RuntimeError('Launchpad build failed; inspect the PPA build page before retrying')
     if builds and all(b['buildstate'] == 'Successfully built' for b in builds):
-        binaries = get(archive + '?' + urllib.parse.urlencode({'ws.op': 'getPublishedBinaries', 'binary_name': 'usagestat', 'exact_match': 'true', 'version': version + '-1ppa1', 'status': 'Published'}))['entries']
-        published = {b['distro_arch_series_link'] for b in binaries if b['binary_package_version'] == version + '-1ppa1'}
+        binaries = get(archive + '?' + urllib.parse.urlencode({'ws.op': 'getPublishedBinaries', 'binary_name': 'usagestat', 'exact_match': 'true', 'version': deb_version, 'status': 'Published'}))['entries']
+        published = {b['distro_arch_series_link'] for b in binaries if b['binary_package_version'] == deb_version}
         if all(b['distro_series_link'] + '/' + b['arch_tag'] in published for b in builds):
             return 'done'
     return 'pending'
@@ -56,7 +63,11 @@ def main():
     parser.add_argument('platform', choices=['copr', 'ppa'])
     parser.add_argument('version')
     parser.add_argument('--wait', action='store_true')
+    parser.add_argument('--print-version', action='store_true', help='Print the package revision without querying the platform')
     args = parser.parse_args()
+    if args.print_version:
+        print(ppa_version(args.version) if args.platform == 'ppa' else args.version + '-1')
+        return 0
     deadline = time.monotonic() + 2700
     while True:
         result = state(args.platform, args.version)

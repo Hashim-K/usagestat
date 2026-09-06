@@ -1,6 +1,7 @@
 #!/usr/bin/make -f
 
 DEB_HOST_ARCH ?= $(shell dpkg-architecture -qDEB_HOST_ARCH)
+SOURCE_DATE_EPOCH ?= $(shell dpkg-parsechangelog -STimestamp)
 
 %:
 	dh $@
@@ -14,3 +15,5 @@ override_dh_auto_install:
 	install -Dm0755 bin/$(DEB_HOST_ARCH)/usagestatd debian/usagestat/usr/bin/usagestatd
 	mkdir -p debian/usagestat/usr/share/usagestat
 	cp -a plugins debian/usagestat/usr/share/usagestat/
+	# Reproducible source archives use epoch-zero timestamps, rejected by Launchpad.
+	find debian/usagestat -exec touch --date="@$(SOURCE_DATE_EPOCH)" {} +

@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 import os
+import subprocess
 from pathlib import Path
 import tarfile
 import tempfile
@@ -100,8 +101,30 @@ class PackageTests(unittest.TestCase):
                 self.assertIn(f'usagestat-9.8.7/bin/{arch}/usagestatd', names)
             self.assertFalse(any('/debian' in name for name in names))
 
+    def test_debian_install_replaces_epoch_zero_timestamps(self):
+        prepare.prepare('v1.0.3', self.assets, self.base / 'out', ROOT)
+        extracted = self.base / 'build'
+        with tarfile.open(self.base / 'out/usagestat_1.0.3.orig.tar.gz') as archive:
+            archive.extractall(extracted, filter='data')
+        source = extracted / 'usagestat-1.0.3'
+        self.assertEqual((source / 'plugins/codex/plugin.json').stat().st_mtime, 0)
+        epoch = 1788566400
+        subprocess.run(['make', '-f', str(ROOT / 'packaging/debian/rules'),
+                        'override_dh_auto_install', 'DEB_HOST_ARCH=amd64'],
+                       cwd=source, env={**os.environ, 'SOURCE_DATE_EPOCH': str(epoch)},
+                       check=True, capture_output=True)
+        installed = source / 'debian/usagestat'
+        for path in [installed, *installed.rglob('*')]:
+            self.assertEqual(path.stat().st_mtime, epoch, str(path))
+        self.assertEqual((installed / 'usr/share/usagestat/plugins/codex/plugin.json').read_bytes(), b'{}')
+        self.assertTrue(os.access(installed / 'usr/bin/usagestatd', os.X_OK))
+
 
 class PublicationTests(unittest.TestCase):
+    def test_ppa_recovery_revision(self):
+        self.assertEqual(publication.ppa_version('1.0.3'), '1.0.3-1ppa2')
+        self.assertEqual(publication.ppa_version('1.0.4'), '1.0.4-1ppa1')
+
     def test_copr_selects_latest_attempt_and_waits_for_pending(self):
         builds = [{'id': 1, 'source_package': {'version': '1.0.3-1'}, 'state': 'succeeded'}, {'id': 2, 'source_package': {'version': '1.0.3-1'}, 'state': 'running'}, {'id': 3, 'source_package': None, 'state': 'failed'}]
         with patch.object(publication, 'get', return_value={'items': builds}):
@@ -118,18 +141,19 @@ class PublicationTests(unittest.TestCase):
                 publication.state('copr', '1.0.3')
 
     def test_ppa_requires_binaries_published_for_every_build(self):
-        entry = {'source_package_version': '1.0.3-1ppa1', 'status': 'Published', 'date_created': '2026-09-06', 'self_link': 'source'}
+        entry = {'source_package_version': '1.0.3-1ppa2', 'status': 'Published', 'date_created': '2026-09-06', 'self_link': 'source'}
         builds = [{'buildstate': 'Successfully built', 'distro_series_link': 'noble', 'arch_tag': arch} for arch in ['amd64', 'arm64']]
-        binaries = [{'binary_package_version': '1.0.3-1ppa1', 'distro_arch_series_link': 'noble/amd64'}]
+        binaries = [{'binary_package_version': '1.0.3-1ppa2', 'distro_arch_series_link': 'noble/amd64'}]
         def get(url):
             if 'getPublishedSources' in url:
+                self.assertIn('version=1.0.3-1ppa2', url)
                 return {'entries': [entry]}
             if 'getBuilds' in url:
                 return {'entries': builds}
             return {'entries': binaries}
         with patch.object(publication, 'get', side_effect=get):
             self.assertEqual(publication.state('ppa', '1.0.3'), 'pending')
-            binaries.append({'binary_package_version': '1.0.3-1ppa1', 'distro_arch_series_link': 'noble/arm64'})
+            binaries.append({'binary_package_version': '1.0.3-1ppa2', 'distro_arch_series_link': 'noble/arm64'})
             self.assertEqual(publication.state('ppa', '1.0.3'), 'done')
             builds[1]['buildstate'] = 'Failed to build'
             with self.assertRaises(RuntimeError):
