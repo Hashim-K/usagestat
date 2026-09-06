@@ -18,7 +18,9 @@ def ppa_version(version):
 
 
 def get(url):
-    with urllib.request.urlopen(url, timeout=30) as response:
+    # Cached "missing" results can outlive publication and trigger duplicate uploads.
+    request = urllib.request.Request(url, headers={'Cache-Control': 'no-cache'})
+    with urllib.request.urlopen(request, timeout=30) as response:
         return json.load(response)
 
 
