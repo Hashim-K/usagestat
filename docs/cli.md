@@ -4,6 +4,9 @@
 plugins, probing live usage, checking provider status pages, exporting usage
 snapshots, and managing backend config/cache state.
 
+This reference describes the current source checkout. See the
+[installation guide](installation.md) for published packages and setup.
+
 The CLI is intended to grow into a superset of CodexBar's CLI capabilities.
 `usage`, `status`, `cost`, `config`, and `cache` mirror CodexBar's command
 families where the backend already has equivalent data.
@@ -15,6 +18,10 @@ side, while still allowing provider-specific labels for balances, credits, and
 model-specific quota pools.
 
 ## Running The CLI
+
+For packaged installs, bundled provider resources, upgrades, and removal, start
+with the [installation guide](installation.md). The commands below are useful
+when developing from a checkout.
 
 From a checkout, run the binary through Cargo:
 
@@ -33,6 +40,10 @@ cargo build -p usagestat-cli
 cargo install --path crates/ai-usage-cli
 usagestat list
 ```
+
+That `cargo install` command installs only the CLI. Use the
+[complete source installation](installation.md#from-source) or a dev installer
+to install the daemon and plugins as well.
 
 When running through Cargo, everything after `--` is passed to `usagestat`.
 

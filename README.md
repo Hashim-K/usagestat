@@ -1,40 +1,163 @@
 # usagestat
 
-Backend for local agent usage data.
+Track AI provider quotas, token usage, and costs through a scriptable CLI,
+a local dashboard, and an HTTP API.
 
-This starts from CrossUsage's architecture, but uses separate project names and
-contracts:
+<p>
+  <a href="https://github.com/Hashim-K/usagestat/releases/latest"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/Hashim-K/usagestat/release.svg?variant=outline&amp;size=sm&amp;logo=github&amp;mode=dark">
+    <img alt="Latest release" src="https://shieldcn.dev/github/Hashim-K/usagestat/release.svg?variant=outline&amp;size=sm&amp;logo=github&amp;mode=light">
+  </picture></a>
+  <a href="https://aur.archlinux.org/packages/usagestat-bin"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AUR-package-1793D1.svg?variant=outline&amp;size=sm&amp;logo=archlinux&amp;mode=dark">
+    <img alt="AUR: usagestat-bin" src="https://shieldcn.dev/badge/AUR-package-1793D1.svg?variant=outline&amp;size=sm&amp;logo=archlinux&amp;mode=light">
+  </picture></a>
+  <a href="https://github.com/Hashim-K/homebrew-tap/blob/main/Formula/usagestat.rb"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Homebrew-tap-FBB040.svg?variant=outline&amp;size=sm&amp;logo=homebrew&amp;mode=dark">
+    <img alt="Homebrew: hashim-k/tap/usagestat" src="https://shieldcn.dev/badge/Homebrew-tap-FBB040.svg?variant=outline&amp;size=sm&amp;logo=homebrew&amp;mode=light">
+  </picture></a>
+  <a href="https://copr.fedorainfracloud.org/coprs/hashimkarim/usagestat/"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Fedora-COPR-51A2DA.svg?variant=outline&amp;size=sm&amp;logo=fedora&amp;mode=dark">
+    <img alt="Fedora COPR: hashimkarim/usagestat" src="https://shieldcn.dev/badge/Fedora-COPR-51A2DA.svg?variant=outline&amp;size=sm&amp;logo=fedora&amp;mode=light">
+  </picture></a>
+  <a href="https://launchpad.net/~hashimkarim/+archive/ubuntu/usagestat"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Ubuntu-PPA-E95420.svg?variant=outline&amp;size=sm&amp;logo=ubuntu&amp;mode=dark">
+    <img alt="Ubuntu PPA: hashimkarim/usagestat" src="https://shieldcn.dev/badge/Ubuntu-PPA-E95420.svg?variant=outline&amp;size=sm&amp;logo=ubuntu&amp;mode=light">
+  </picture></a>
+  <a href="LICENSE"><picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/github/Hashim-K/usagestat/license.svg?variant=outline&amp;size=sm&amp;mode=dark">
+    <img alt="MIT license" src="https://shieldcn.dev/github/Hashim-K/usagestat/license.svg?variant=outline&amp;size=sm&amp;mode=light">
+  </picture></a>
+</p>
 
-- `usagestat-core`: shared models, config, paths, cache.
-- `usagestat-plugins`: JavaScript provider plugin loader/runtime.
-- `usagestat-cli`: scriptable CLI.
-- `usagestat-daemon`: local polling daemon with an HTTP API.
+- Probe provider accounts through JavaScript plugins and export JSON or CSV.
+- Keep usage available in a local dashboard with an optional background daemon.
+- Connect to **T3 Code → Usage → Limits** through the built-in CLIProxyAPI bridge.
+- Install both `usagestat` and `usagestatd`, plus bundled provider plugins, from
+  your preferred package channel.
 
-## Development
+## Install
+
+Choose a package manager already available on your system. Published packages
+and release downloads currently target **Linux**; the Homebrew formula is also
+Linux-only. Availability below was checked against release **v1.0.3**.
+
+| Channel | Published OS / CPU support | Package |
+| --- | --- | --- |
+| [Arch Linux / AUR](https://aur.archlinux.org/packages/usagestat-bin) | Arch Linux · x86-64 | `usagestat-bin` — release binaries |
+| [Homebrew](https://github.com/Hashim-K/homebrew-tap/blob/main/Formula/usagestat.rb) | Linux with system glibc 2.39+ · x86-64, ARM64 | `hashim-k/tap/usagestat` |
+| [Fedora COPR](https://copr.fedorainfracloud.org/coprs/hashimkarim/usagestat/) | Fedora 43, 44, 45, Rawhide · x86-64 | `usagestat` |
+| [Ubuntu PPA](https://launchpad.net/~hashimkarim/+archive/ubuntu/usagestat) | Ubuntu 24.04 LTS (Noble) · amd64 | `usagestat` |
+| [GitHub Releases](https://github.com/Hashim-K/usagestat/releases/latest) | Linux with glibc 2.39+ · x86-64, ARM64 | CLI + daemon + plugins in `.tar.gz` archives |
+
+### Arch Linux
+
+With an existing AUR helper:
 
 ```bash
-cargo run -p usagestat-cli -- list
-cargo run -p usagestat-cli -- --json usage mock
-cargo run -p usagestat-cli -- usage --provider claude --save
-cargo run -p usagestat-cli -- status claude codex
-cargo run -p usagestat-cli -- export --format csv
-cargo run -p usagestat-cli -- auth import-cookies --provider codex --format json
-cargo run -p usagestat-cli -- config validate
-cargo run -p usagestat-cli -- cache clear --history
-cargo run -p usagestat-cli -- plugin validate
-cargo run -p usagestat-daemon
-curl http://127.0.0.1:6736/v1/usage
+yay -S usagestat-bin
 ```
 
-CLI usage docs: [docs/cli.md](docs/cli.md).
+[Helper-free installation and PKGBUILD review](docs/installation.md#arch-linux--aur).
+
+### Homebrew on Linux
+
+With [Homebrew installed](https://docs.brew.sh/Installation):
+
+```bash
+brew install hashim-k/tap/usagestat
+```
+
+The release binaries require **system glibc 2.39+** (for example, Ubuntu 24.04).
+For older systems, use a [source build](docs/installation.md#from-source).
+
+If Homebrew asks for trust, review and approve this formula. See the
+[formula-scoped trust instructions](docs/installation.md#homebrew-on-linux).
+
+### Fedora
+
+```bash
+sudo dnf install dnf5-plugins
+sudo dnf copr enable hashimkarim/usagestat
+sudo dnf install usagestat
+```
+
+### Ubuntu 24.04
+
+```bash
+sudo apt update
+sudo apt install software-properties-common
+sudo add-apt-repository ppa:hashimkarim/usagestat
+sudo apt update
+sudo apt install usagestat
+```
+
+For direct downloads, source builds, upgrades, and removal, see the
+[installation guide](docs/installation.md).
+
+## First run
+
+```bash
+usagestat --version
+usagestat list
+usagestat config validate
+```
+
+You should see the installed version, discovered providers, and configuration
+validation results. Provider access is separate from installation: sign into
+its supported CLI/app or configure its credentials before probing. For example:
+
+```bash
+usagestat usage claude
+usagestat --json usage claude
+```
+
+To include a provider in regular polling, add it to
+`~/.config/usagestat/config.toml` (or the corresponding XDG config directory):
+
+```toml
+[[providers]]
+id = "claude"
+enabled = true
+```
+
+On Linux with a systemd user session, start the dashboard and enable startup at
+login:
+
+```bash
+usagestat daemon enable
+usagestat daemon status
+usagestat dashboard
+```
+
+The dashboard is at <http://127.0.0.1:6736/dashboard>. Use
+`usagestat dashboard --url` to print its link over SSH. Without systemd, run
+`usagestatd` in a terminal and open that URL while it is running. CLI probes work
+without starting the daemon.
+
+### Connect T3 Code
+
+```bash
+usagestat daemon t3 auto
+usagestat daemon key
+```
+
+With the daemon running, add `http://127.0.0.1:6736` as a CLIProxyAPI hub in T3
+Code and paste the printed management key. T3 mode is remembered across daemon
+stops and restarts. `usagestat daemon t3 off` disables the bridge;
+`usagestat daemon disable` stops the daemon and turns off autostart.
+See the [T3 Code setup guide](docs/t3-code.md) for supported quotas and details.
+
+## Providers and configuration
 
 Plugins are discovered from:
 
 1. `USAGESTAT_PLUGIN_DIR`
 2. `~/.config/usagestat/plugins`
-3. `./plugins`
+3. Installed `share/usagestat/plugins` and `lib/usagestat/plugins` under the binary prefix
+4. `./plugins`
 
-Bundled providers:
+Bundled providers include:
 
 - `abacus-ai`, `alibaba`, `alibaba-token-plan`, `amp`, `antigravity`, `augment`
 - `aws-bedrock`, `azure-openai`, `claude`, `codebuff`, `codex`, `command-code`
@@ -49,7 +172,8 @@ Bundled providers:
 resolved to absolute SVG paths; `icon.path` is the monochrome/default icon and
 `icon.colorPath` is present only when a separate color SVG is available.
 
-## Config
+<details>
+<summary>Configuration paths and advanced example</summary>
 
 Default config path:
 
@@ -63,7 +187,8 @@ Default cache path:
 ~/.local/share/usagestat/snapshots.json
 ```
 
-Example:
+An advanced example with separate accounts and sources (`mock` requires the
+dev-only plugins described below):
 
 ```toml
 refreshSec = 60
@@ -107,7 +232,51 @@ cargo run -p usagestat-cli -- --config ./config.toml --plugin-dir ./plugins list
 cargo run -p usagestat-daemon -- --config ./config.toml --refresh-sec 30
 ```
 
-HTTP endpoints currently implemented:
+</details>
+
+## Development
+
+Build and install a separate dev profile with a current stable Rust toolchain
+and the [source-build prerequisites](docs/installation.md#from-source):
+
+```bash
+scripts/install-dev.sh
+usagestat-dev --version
+```
+
+`usagestat-dev daemon enable` uses the separate `usagestat-dev.service` and dev
+config/data directories.
+
+This starts from CrossUsage's architecture, but uses separate project names and
+contracts:
+
+- `usagestat-core`: shared models, config, paths, cache.
+- `usagestat-plugins`: JavaScript provider plugin loader/runtime.
+- `usagestat-cli`: scriptable CLI.
+- `usagestat-daemon`: local polling daemon with an HTTP API.
+
+<details>
+<summary>Run commands directly from the checkout</summary>
+
+```bash
+cargo run -p usagestat-cli -- list
+cargo run -p usagestat-cli -- --plugin-dir templates/dev-providers --json usage mock
+cargo run -p usagestat-cli -- usage --provider claude --save
+cargo run -p usagestat-cli -- status claude codex
+cargo run -p usagestat-cli -- export --format csv
+cargo run -p usagestat-cli -- auth import-cookies --provider codex --format json
+cargo run -p usagestat-cli -- config validate
+cargo run -p usagestat-cli -- cache clear --history
+cargo run -p usagestat-cli -- plugin validate
+cargo run -p usagestat-daemon
+curl http://127.0.0.1:6736/v1/usage
+```
+
+</details>
+
+## HTTP API
+
+Endpoints in the source checkout:
 
 - `GET /health`
 - `GET /v1/providers`
@@ -115,25 +284,10 @@ HTTP endpoints currently implemented:
 - `GET /v1/usage/:providerId`
 - `GET /v0/management/quota-scheduler/status` (opt-in, management key required)
 
-To use this backend in **T3 Code → Usage → Limits**, enable the CLIProxyAPI
-compatibility endpoint and add the daemon as a usage hub. See the
-[T3 Code setup guide](docs/t3-code.md) for key configuration and supported quotas.
+See [CLI documentation](docs/cli.md) for usage/history exports and daemon controls.
 
-Linux users can opt into startup at login with `usagestat daemon enable` after
-installing both `usagestat` and `usagestatd`. This starts the dashboard and native
-API at `http://127.0.0.1:6736`. Use `usagestat daemon status` to check it and
-`usagestat daemon disable` to stop it and turn autostart off.
-`usagestat daemon t3 auto` exposes the T3 compatibility endpoint whenever the
-daemon runs; `usagestat daemon t3 off` keeps it disabled. Plain `daemon enable`
-remembers that mode, including after stopping the daemon. `usagestat daemon key`
-prints the management key for T3's Add hub dialog. Status shows the saved mode
-and whether the bridge is currently available.
-
-Open the dashboard with `usagestat dashboard`, or print its link with
-`usagestat dashboard --url` for use over SSH. The command uses the daemon's
-configured address and gives startup guidance if it is not responding.
-
-## Plugin Host API
+<details>
+<summary>Plugin host API</summary>
 
 Provider plugins export `globalThis.__usagestat_plugin.probe(ctx)`.
 
@@ -168,3 +322,22 @@ Host HTTP responses use:
   "bodyText": "{}"
 }
 ```
+
+</details>
+
+## Documentation and contributing
+
+- [Installation, upgrades, and removal](docs/installation.md)
+- [CLI reference and troubleshooting](docs/cli.md)
+- [T3 Code integration](docs/t3-code.md)
+- [GNOME extension integration](docs/gnome-extension.md)
+- [Release publishing and platform maintenance](docs/distribution.md)
+- [Provider plugin template](templates/provider-plugin/README.md)
+- [Changelog](CHANGELOG.md)
+
+For changes, run `cargo test --locked --workspace`. Report bugs or propose
+changes through [GitHub issues](https://github.com/Hashim-K/usagestat/issues).
+
+## License
+
+[MIT](LICENSE). This project builds on CrossUsage's architecture.
