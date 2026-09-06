@@ -120,6 +120,68 @@ class PackageTests(unittest.TestCase):
         self.assertTrue(os.access(installed / 'usr/bin/usagestatd', os.X_OK))
 
 
+class HomebrewPublishingTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.prepared = self.base / 'prepared'
+        (self.prepared / 'x86_64').mkdir(parents=True)
+        (self.prepared / 'usagestat.rb').write_text('# test formula\n')
+        self.bin = self.base / 'bin'
+        self.bin.mkdir()
+        self.log = self.base / 'commands.log'
+        self.log.touch()
+        self.executable(self.prepared / 'x86_64/usagestat', 'echo "usagestat 1.0.3"\n')
+        self.executable(self.prepared / 'x86_64/usagestatd', 'exit 0\n')
+        self.executable(self.bin / 'ruby', 'exit 0\n')
+        # Replace network and Git operations, while exercising the real publisher.
+        self.executable(self.bin / 'python3', 'echo python3 >> "$COMMAND_LOG"\n')
+        self.executable(self.bin / 'git', '''printf 'git %s\\n' "$*" >> "$COMMAND_LOG"
+if [ "$1" = clone ]; then
+    mkdir -p "$3/Formula"
+elif [ "$1" = diff ]; then
+    exit 1
+fi
+''')
+        self.env = {key: value for key, value in os.environ.items()
+                    if not key.startswith('HOMEBREW_') and key != 'GITHUB_STEP_SUMMARY'}
+        self.env.update(PATH=str(self.bin) + os.pathsep + os.environ['PATH'],
+                        RELEASE_TAG='v1.0.3', DRY_RUN='false', COMMAND_LOG=str(self.log))
+
+    @staticmethod
+    def executable(path, body):
+        path.write_text('#!/bin/sh\nset -eu\n' + body)
+        path.chmod(0o755)
+
+    def publish(self, **env):
+        return subprocess.run(
+            ['bash', str(ROOT / 'tools/publish/scripts/publish-platform.sh'),
+             'homebrew', str(self.prepared)],
+            env={**self.env, **env}, text=True, capture_output=True, timeout=10)
+
+    def test_missing_tap_fails_before_network_access(self):
+        result = self.publish(HOMEBREW_SSH_PRIVATE_KEY='test key')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('HOMEBREW_TAP_REPOSITORY', result.stderr)
+        self.assertEqual(self.log.read_text(), '')
+
+    def test_configured_tap_is_used_for_publication(self):
+        result = self.publish(HOMEBREW_SSH_PRIVATE_KEY='test key',
+                              HOMEBREW_TAP_REPOSITORY='test-owner/homebrew-configured')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        commands = self.log.read_text().splitlines()
+        self.assertIn(f'git clone git@github.com:test-owner/homebrew-configured.git {self.prepared}/tap', commands)
+        self.assertIn('git push origin HEAD', commands)
+        self.assertEqual((self.prepared / 'tap/Formula/usagestat.rb').read_text(),
+                         (self.prepared / 'usagestat.rb').read_text())
+
+    def test_dry_run_needs_no_tap_or_publishing_key(self):
+        result = self.publish(DRY_RUN='true')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.log.read_text(), '')
+
+
 class PublicationTests(unittest.TestCase):
     def test_ppa_recovery_revision(self):
         self.assertEqual(publication.ppa_version('1.0.3'), '1.0.3-1ppa2')

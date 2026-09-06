@@ -79,8 +79,9 @@ case "$platform" in
     test "$("$package_dir/x86_64/usagestat" --version)" = "usagestat $version"
     "$package_dir/x86_64/usagestatd" --help >/dev/null
     if [[ "$dry_run" == false ]]; then
-      assert_latest
       require_secret HOMEBREW_SSH_PRIVATE_KEY
+      : "${HOMEBREW_TAP_REPOSITORY:?Set the HOMEBREW_TAP_REPOSITORY repository variable. See docs/distribution.md.}"
+      assert_latest
       ssh_dir="$(mktemp -d)"
       trap 'rm -rf "$ssh_dir"' EXIT
       chmod 700 "$ssh_dir"
@@ -94,7 +95,7 @@ with urllib.request.urlopen('https://api.github.com/meta', timeout=30) as respon
         print('github.com ' + key)
 PYKEYS
       export GIT_SSH_COMMAND="ssh -i $ssh_dir/key -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$ssh_dir/known_hosts"
-      git clone git@github.com:Hashim-K/homebrew-tap.git "$package_dir/tap"
+      git clone "git@github.com:${HOMEBREW_TAP_REPOSITORY}.git" "$package_dir/tap"
       cp "$package_dir/usagestat.rb" "$package_dir/tap/Formula/usagestat.rb"
       cd "$package_dir/tap"
       git add Formula/usagestat.rb

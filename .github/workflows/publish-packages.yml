@@ -98,6 +98,7 @@ jobs:
           AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           AUR_SSH_KNOWN_HOSTS: ${{ vars.AUR_SSH_KNOWN_HOSTS }}
           HOMEBREW_SSH_PRIVATE_KEY: ${{ secrets.HOMEBREW_SSH_PRIVATE_KEY }}
+          HOMEBREW_TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
           COPR_CONFIG: ${{ secrets.COPR_CONFIG }}
           PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
           PPA_GPG_FINGERPRINT: ${{ vars.PPA_GPG_FINGERPRINT }}
@@ -106,7 +107,7 @@ jobs:
           import os
           required = {
               'aur': ['AUR_SSH_PRIVATE_KEY', 'AUR_SSH_KNOWN_HOSTS'],
-              'homebrew': ['HOMEBREW_SSH_PRIVATE_KEY'],
+              'homebrew': ['HOMEBREW_SSH_PRIVATE_KEY', 'HOMEBREW_TAP_REPOSITORY'],
               'copr': ['COPR_CONFIG'],
               'ppa': ['PPA_GPG_PRIVATE_KEY', 'PPA_GPG_FINGERPRINT'],
           }[os.environ['PLATFORM']]
@@ -145,6 +146,7 @@ jobs:
         if: matrix.platform == 'homebrew'
         env:
           HOMEBREW_SSH_PRIVATE_KEY: ${{ secrets.HOMEBREW_SSH_PRIVATE_KEY }}
+          HOMEBREW_TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY }}
         run: tools/publish/scripts/publish-platform.sh homebrew prepared
       - name: Validate and publish COPR
         if: matrix.platform == 'copr'
