@@ -25,7 +25,7 @@ fn concurrent_creation_publishes_exactly_one_complete_value() {
         .filter(|(created, _)| *created)
         .collect();
     assert_eq!(winners.len(), 1);
-    assert_eq!(storage::read_private(&path).unwrap(), winners[0].1);
+    assert!(storage::read_private(&path).unwrap() == winners[0].1);
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
 }
 

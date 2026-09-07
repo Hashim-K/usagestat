@@ -264,6 +264,64 @@ pub fn temporary_directory() -> io::Result<tempfile::TempDir> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn interrupted_writer_child() {
+        let Some(directory) = std::env::var_os("USAGESTAT_TEST_INTERRUPTED_WRITE") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        write_atomic_with(&directory.join("state.json"), |file| {
+            file.write_all(b"incomplete replacement")?;
+            file.sync_all()?;
+            fs::write(directory.join("ready"), b"ready")?;
+            loop {
+                std::thread::park();
+            }
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn process_termination_preserves_last_committed_state() {
+        let directory = temporary_directory().unwrap();
+        let path = directory.path().join("state.json");
+        write_atomic(&path, b"committed state").unwrap();
+        let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "storage::tests::interrupted_writer_child"])
+            .env("USAGESTAT_TEST_INTERRUPTED_WRITE", directory.path())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !directory.path().join("ready").exists() && Instant::now() < deadline {
+            if child.try_wait().unwrap().is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let ready = directory.path().join("ready").exists();
+        let _ = child.kill();
+        child.wait().unwrap();
+        assert!(ready, "writer did not reach the unpublished write");
+        assert!(read_private(&path).unwrap() == "committed state");
+        // An uncatchable process kill cannot run destructors. Any abandoned
+        // temporary is private and is never mistaken for committed state.
+        for entry in fs::read_dir(directory.path()).unwrap() {
+            let entry = entry.unwrap();
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(".usagestat-state-")
+            {
+                assert!(read_private(&entry.path()).is_ok());
+            }
+        }
+        write_atomic(&path, b"recovered state").unwrap();
+        assert!(read_private(&path).unwrap() == "recovered state");
+    }
+
     #[test]
     fn failed_write_retains_last_state_and_removes_temporary() {
         let directory = temporary_directory().unwrap();

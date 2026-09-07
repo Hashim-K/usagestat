@@ -98,6 +98,7 @@ globalThis.__usagestat_plugin = { probe(ctx) {
         for name, command, expected_code in [("cli", argv, 130), ("daemon", daemon_argv, 0)]:
             for event in events:
                 event_name = str(event) if os.name == "nt" else event.name
+                print(f"Checking {name} shutdown via {event_name}", flush=True)
                 ready = configure("helper", name + "-" + event_name)
                 options = ({"creationflags": subprocess.CREATE_NEW_CONSOLE} if os.name == "nt"
                            else {"start_new_session": True})
@@ -118,6 +119,12 @@ globalThis.__usagestat_plugin = { probe(ctx) {
                     result["checks"].append(name + ":" + event_name)
                 finally:
                     if child.poll() is None:
+                        if os.name == "nt":
+                            # Only this test's PID tree. Do this before killing
+                            # the parent so failed tests cannot orphan fixtures.
+                            subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32/taskkill.exe"),
+                                            "/PID", str(child.pid), "/T", "/F"],
+                                           capture_output=True, timeout=10)
                         child.kill()
                         child.wait(timeout=5)
     return result
