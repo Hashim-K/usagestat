@@ -102,11 +102,18 @@ globalThis.__usagestat_plugin = { probe(ctx) {
                 ready = configure("helper", name + "-" + event_name)
                 options = ({"creationflags": subprocess.CREATE_NEW_CONSOLE} if os.name == "nt"
                            else {"start_new_session": True})
-                child = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, **options)
+                pseudo = os.name == "nt" and event == "close"
+                if pseudo:
+                    from windows_console import PseudoConsoleProcess
+                    child = PseudoConsoleProcess(command, root, env)
+                else:
+                    child = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE,
+                                             stderr=subprocess.PIPE, **options)
                 try:
                     address = read_address(ready, time.monotonic() + 8)
-                    if os.name == "nt":
+                    if pseudo:
+                        child.close_console()
+                    elif os.name == "nt":
                         sender = subprocess.run([sys.executable, str(Path(__file__).with_name("windows_console.py")),
                                                  str(child.pid), event], capture_output=True, timeout=5)
                         # Closing that console can also terminate its sender.
@@ -127,6 +134,8 @@ globalThis.__usagestat_plugin = { probe(ctx) {
                                            capture_output=True, timeout=10)
                         child.kill()
                         child.wait(timeout=5)
+                    if pseudo:
+                        child.release()
     return result
 
 
