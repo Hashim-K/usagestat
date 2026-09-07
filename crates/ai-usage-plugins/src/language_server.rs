@@ -374,7 +374,10 @@ ConvertTo-Json -InputObject @($rows) -Compress -Depth 3
         "-EncodedCommand",
         &encoded,
     ]);
-    let output = process::run(command, Duration::from_secs(8), 2 * 1024 * 1024)
+    // Cold Windows PowerShell/CIM startup exceeded eight seconds on native
+    // hosted runners. Keep per-operation CIM limits and a bounded total budget
+    // below the normal provider probe deadline.
+    let output = process::run(command, Duration::from_secs(15), 2 * 1024 * 1024)
         .map_err(|_| "ide-discovery-timed-out")?;
     if !output.status.success() {
         return Err("ide-process-query-denied");

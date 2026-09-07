@@ -2353,26 +2353,47 @@ mod tests {
             inject_keychain(&ctx, &host, "credential-fixture").unwrap();
             ctx.globals().set("host", host).unwrap();
             ctx.globals().set("target", target).unwrap();
-            let passed: bool = ctx.eval(r#"
+            let passed: rquickjs::Result<bool> = ctx.eval(r#"
                 (() => {
                   const k = host.keychain;
                   const check = value => { if (!value) throw new Error('credential fixture mismatch'); };
+                  globalThis.credentialFixtureStep = 'create current-user item';
                   k.writeGenericPasswordForCurrentUser(target, 'synthetic 使用');
+                  globalThis.credentialFixtureStep = 'read current-user item';
                   check(k.readGenericPasswordForCurrentUser(target) === 'synthetic 使用');
+                  globalThis.credentialFixtureStep = 'read account metadata';
                   const item = JSON.parse(k.readGenericPasswordItem(target));
                   check(item.account.length > 0 && item.password === 'synthetic 使用');
+                  globalThis.credentialFixtureStep = 'reject other account';
                   try { k.writeGenericPasswordForAccount(target, 'unrelated-fixture-account', 'wrong'); return false; }
                   catch (error) { check(String(error).includes('credential-account-mismatch')); }
+                  globalThis.credentialFixtureStep = 'read retained UTF-8';
                   check(k.readGenericPassword(target) === 'synthetic 使用');
+                  globalThis.credentialFixtureStep = 'write UTF-16';
                   k.writeWindowsGenericPassword(target, item.account, '{"refresh":"synthetic café"}', 'utf16le');
+                  globalThis.credentialFixtureStep = 'read UTF-16';
                   check(k.readWindowsGenericPassword(target, item.account, 'utf16le') === '{"refresh":"synthetic café"}');
+                  globalThis.credentialFixtureStep = 'delete owned item';
                   k.deleteGenericPassword(target, item.account);
+                  globalThis.credentialFixtureStep = 'verify missing item';
                   try { k.readGenericPassword(target); return false; }
                   catch (error) { check(String(error).includes('credential-missing')); }
                   return true;
                 })()
-            "#).unwrap();
-            assert!(passed);
+            "#);
+            let thrown = passed.is_err().then(|| ctx.catch());
+            let step: String = ctx.globals().get("credentialFixtureStep").unwrap();
+            match passed {
+                Ok(value) => assert!(value, "native credential fixture: {step}"),
+                Err(_) => {
+                    // Every operation above targets this test's disposable
+                    // synthetic item. No real account/store contents are read.
+                    let error = thrown.unwrap();
+                    ctx.globals().set("credentialFixtureError", error).unwrap();
+                    let detail: String = ctx.eval("String(credentialFixtureError)").unwrap();
+                    panic!("native credential fixture failed at {step}: {detail}");
+                }
+            }
         });
     }
 
