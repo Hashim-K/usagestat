@@ -74,7 +74,24 @@ impl LaunchAgent {
         if job_dictionary(&self.label)?.is_some() {
             // bootout sends the registered job SIGTERM. ExitTimeout bounds it,
             // and the backend's signal handler cancels its helper trees.
-            launchctl(&["bootout", &self.target()])?;
+            let target = self.target();
+            let output = launchctl_output(&["bootout", &target])?;
+            // Removal is asynchronous, and another bootout can report ESRCH
+            // while the native job dictionary still exposes the exiting job.
+            if !output.status.success() && output.status.code() != Some(3) {
+                bail!(
+                    "launchctl bootout {target} failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                );
+            }
+            self.domain_available()?;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while job_dictionary(&self.label)?.is_some() {
+                if Instant::now() >= deadline {
+                    bail!("LaunchAgent removal did not finish for {target}");
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
         }
         Ok(())
     }
@@ -208,9 +225,7 @@ impl ServiceManager for LaunchAgent {
 }
 
 fn launchctl(args: &[&str]) -> Result<Output> {
-    let mut command = usagestat_core::process::command("/bin/launchctl")?;
-    command.args(args);
-    let output = usagestat_core::process::run(command, Duration::from_secs(15), 256 * 1024)?;
+    let output = launchctl_output(args)?;
     if !output.status.success() {
         bail!(
             "launchctl {} failed: {}",
@@ -218,6 +233,13 @@ fn launchctl(args: &[&str]) -> Result<Output> {
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
+    Ok(output)
+}
+
+fn launchctl_output(args: &[&str]) -> Result<Output> {
+    let mut command = usagestat_core::process::command("/bin/launchctl")?;
+    command.args(args);
+    let output = usagestat_core::process::run(command, Duration::from_secs(15), 256 * 1024)?;
     Ok(output)
 }
 
