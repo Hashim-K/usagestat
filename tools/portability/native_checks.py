@@ -15,6 +15,7 @@ import traceback
 
 from native_smoke import isolated_env, smoke
 from probe_cancellation import check as check_probe_cancellation
+from daemon_lifecycle import check as check_daemon_lifecycle
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -74,6 +75,7 @@ def main() -> int:
                 report["smoke"] = smoke(target_dir / args.target / "debug", temp_dir=args.smoke_temp_dir)
                 suffix = ".exe" if os.name == "nt" else ""
                 report["probe_cancellation"] = check_probe_cancellation(target_dir / args.target / "debug" / ("usagestat" + suffix))
+                report["daemon_lifecycle"] = check_daemon_lifecycle(target_dir / args.target / "debug")
             else:
                 report["smoke"] = {"status": "blocked", "reason": "native build failed; see build.log"}
         except Exception as error:

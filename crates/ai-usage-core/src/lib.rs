@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod daemon_settings;
 pub mod manifest;
 pub mod model;
 pub mod normalized;

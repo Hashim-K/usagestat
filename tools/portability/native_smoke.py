@@ -45,6 +45,9 @@ def isolated_env(root: Path) -> dict[str, str]:
     env["NO_PROXY"] = "*"
     env["RUST_BACKTRACE"] = "1"
     env.pop("USAGESTAT_MANAGEMENT_KEY", None)
+    # Fixture commands must never reach the developer's real login manager.
+    env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+    env.pop("XDG_RUNTIME_DIR", None)
     return env
 
 

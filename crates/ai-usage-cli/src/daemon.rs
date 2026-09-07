@@ -1,47 +1,58 @@
-//! Opt-in, per-user systemd service management. No root privileges or shell needed.
+//! Saved daemon intent and lifecycle, with platform service operations behind adapters.
 use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{SocketAddr, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
 use std::time::{Duration, Instant};
+use usagestat_core::daemon_settings::{
+    DaemonSettings, Installation, T3Mode as SavedT3Mode, local_url,
+};
 use usagestat_core::{AppConfig, paths};
 
-const UNIT: &str = "usagestat.service";
-const MARKER: &str = "# Managed by usagestat daemon enable\n";
+#[cfg(test)]
+mod lifecycle_tests;
+mod service;
+#[cfg(any(target_os = "linux", test))]
+mod systemd;
+use service::{Registration, ServiceManager};
 
 pub(super) fn dev_profile() -> bool {
     paths::is_dev_profile()
 }
 
-fn service_name() -> &'static str {
-    if dev_profile() {
-        "usagestat-dev.service"
-    } else {
-        UNIT
-    }
+fn settings_file() -> Result<PathBuf> {
+    Ok(paths::config_dir()?.join("daemon.json"))
 }
 
-fn service_unit_file() -> Result<PathBuf> {
-    Ok(dirs::config_dir()
-        .context("locate user config directory")?
-        .join("systemd/user")
-        .join(service_name()))
+fn load_settings(manager: &dyn ServiceManager) -> Result<DaemonSettings> {
+    let stored = DaemonSettings::load(&settings_file()?).context("read daemon settings")?;
+    if stored.as_ref().is_some_and(|s| s.installation.is_some()) {
+        return Ok(stored.unwrap());
+    }
+    let migrated = manager.migrate()?;
+    Ok(match (stored, migrated) {
+        (Some(mut stored), Some(migrated)) => {
+            stored.installation = migrated.installation;
+            stored
+        }
+        (Some(stored), None) => stored,
+        (None, Some(migrated)) => migrated,
+        (None, None) => DaemonSettings::default(),
+    })
 }
 
 pub(super) fn dashboard_base_url(bind: Option<SocketAddr>) -> Result<String> {
-    let unit = if bind.is_none() {
-        read_optional_unit(&service_unit_file()?)?
+    let settings = if bind.is_none() {
+        Some(load_settings(service::native()?.as_ref())?)
     } else {
-        String::new()
+        None
     };
-    let bind = match bind {
-        Some(bind) => bind,
-        None if unit.starts_with(MARKER) => unit_bind(&unit)?,
-        None => SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 6736),
-    };
+    let bind = bind
+        .or_else(|| settings.and_then(|s| s.installation.map(|i| i.bind)))
+        .unwrap_or_else(|| "127.0.0.1:6736".parse().unwrap());
     if bind.port() == 0 {
         bail!("the dashboard requires a fixed, nonzero daemon port");
     }
@@ -54,7 +65,7 @@ pub(super) fn check_health(base_url: &str) -> Result<()> {
         .send()?
         .error_for_status()?
         .json()?;
-    if body.get("status").and_then(|status| status.as_str()) != Some("ok") {
+    if body.get("status").and_then(|v| v.as_str()) != Some("ok") {
         bail!("unexpected daemon health response");
     }
     Ok(())
@@ -62,70 +73,63 @@ pub(super) fn check_health(base_url: &str) -> Result<()> {
 
 #[derive(Debug, Subcommand)]
 pub enum DaemonCommand {
-    /// Start the daemon now and automatically at login, preserving the T3 mode
+    /// Start now and automatically at login, preserving saved settings
     Enable {
-        /// Daemon executable (defaults to usagestatd beside this CLI, then PATH)
         #[arg(long, value_name = "PATH")]
         binary: Option<PathBuf>,
-        #[arg(long, default_value = "127.0.0.1:6736")]
-        bind: SocketAddr,
-        /// Select T3 auto mode and create its management key if missing
+        /// Address (defaults to the saved address, then 127.0.0.1:6736)
+        #[arg(long)]
+        bind: Option<SocketAddr>,
         #[arg(long)]
         t3: bool,
+        /// Explicitly transfer this profile from a different installation
+        #[arg(long)]
+        switch_owner: bool,
     },
-    /// Stop the daemon, or set only its T3 mode to off with --t3
+    /// Stop and disable login startup, or disable only T3 with --t3
     Disable {
-        /// Set T3 mode to off; retain the daemon and management key
         #[arg(long)]
         t3: bool,
     },
-    /// Toggle T3 between auto and off, preserving whether the daemon is running
+    /// Toggle T3 while preserving whether the daemon is running
     Toggle {
         #[arg(long, required = true)]
         t3: bool,
     },
-    /// Set whether the T3 bridge follows the daemon (auto) or stays off
+    /// Save T3 auto/off; restart only an already-running owned service
     T3 {
         #[arg(value_enum)]
         mode: T3Mode,
     },
-    /// Show whether the daemon is running and startup at login is enabled
+    /// Show saved configuration, service state and endpoint health
     Status,
-    /// Print the management key to paste into T3 Code
+    /// Print the existing management key to paste into T3 Code
     Key,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ServiceStatus {
-    service: &'static str,
-    autostart: bool,
-    running: bool,
-    unit_file: PathBuf,
-    t3_mode: T3Mode,
-    t3_available: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    management_key_file: Option<PathBuf>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    dashboard_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    hub_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum T3Mode {
-    /// Expose the bridge whenever the daemon runs
     Auto,
-    /// Keep the bridge disabled
     Off,
 }
-
-impl T3Mode {
-    fn from_enabled(enabled: bool) -> Self {
-        if enabled { Self::Auto } else { Self::Off }
+impl From<T3Mode> for SavedT3Mode {
+    fn from(value: T3Mode) -> Self {
+        match value {
+            T3Mode::Auto => Self::Auto,
+            T3Mode::Off => Self::Off,
+        }
     }
-
+}
+impl From<SavedT3Mode> for T3Mode {
+    fn from(value: SavedT3Mode) -> Self {
+        match value {
+            SavedT3Mode::Auto => Self::Auto,
+            SavedT3Mode::Off => Self::Off,
+        }
+    }
+}
+impl T3Mode {
     fn status_text(self, running: bool, available: bool) -> &'static str {
         match (self, running, available) {
             (Self::Off, _, _) => "off",
@@ -136,177 +140,54 @@ impl T3Mode {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct DaemonSettings {
+struct ServiceStatus {
+    service: String,
+    manager: &'static str,
+    manager_available: bool,
+    configured: bool,
+    registered: bool,
+    autostart: bool,
+    running: bool,
+    healthy: bool,
+    condition: &'static str,
+    unit_file: Option<PathBuf>,
+    owner: Option<PathBuf>,
+    backend_version: Option<String>,
+    diagnostics: Vec<String>,
     t3_mode: T3Mode,
-}
-
-impl DaemonSettings {
-    fn load(path: &Path, unit: &str, key: &Path) -> Result<Self> {
-        match fs::read_to_string(path) {
-            Ok(text) => {
-                #[derive(Deserialize)]
-                #[serde(rename_all = "camelCase")]
-                struct StoredSettings {
-                    t3_mode: Option<T3Mode>,
-                    t3_enabled: Option<bool>,
-                }
-                let stored: StoredSettings =
-                    serde_json::from_str(&text).context("read daemon settings")?;
-                Ok(Self {
-                    t3_mode: stored
-                        .t3_mode
-                        .or_else(|| stored.t3_enabled.map(T3Mode::from_enabled))
-                        .context("daemon settings must contain t3Mode (auto or off)")?,
-                })
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Self {
-                // Preserve services created before the settings file existed.
-                t3_mode: T3Mode::from_enabled(unit_enables_t3(unit, key)?),
-            }),
-            Err(e) => Err(e).context("read daemon settings"),
-        }
-    }
-
-    fn save(&self, path: &Path) -> Result<()> {
-        write_atomic(path, &format!("{}\n", serde_json::to_string_pretty(self)?))
-    }
+    t3_available: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    management_key_file: Option<PathBuf>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dashboard_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    hub_url: Option<String>,
 }
 
 pub fn run(
     command: &DaemonCommand,
-    config_path: &Path,
+    config: Option<&Path>,
     extra_dirs: &[PathBuf],
     json: bool,
 ) -> Result<()> {
-    if !cfg!(target_os = "linux") {
-        bail!("daemon autostart currently requires Linux with a systemd user session");
-    }
-    let service = service_name();
-    let key_file = paths::management_key_file()?;
     if matches!(command, DaemonCommand::Key) {
-        let key = read_key(&key_file)
+        let key_path = DaemonSettings::load(&settings_file()?)?
+            .and_then(|s| s.installation)
+            .map(|i| i.management_key_file)
+            .unwrap_or(paths::management_key_file()?);
+        let key = read_key(&key_path)
             .context("no usable management key; run `usagestat daemon t3 auto` first")?;
         if json {
-            println!(
-                "{}",
-                serde_json::to_string(&serde_json::json!({"managementKey": key}))?
-            );
+            println!("{}", serde_json::json!({"managementKey": key}));
         } else {
             println!("{key}");
         }
         return Ok(());
     }
-    let unit_file = service_unit_file()?;
-    let settings_file = paths::config_dir()?.join("daemon.json");
-    let old_unit = read_optional_unit(&unit_file)?;
-    let mut settings = DaemonSettings::load(&settings_file, &old_unit, &key_file)?;
-    let mut base_url = None;
-    match command {
-        DaemonCommand::Enable { binary, bind, t3 } => {
-            // Validate all inputs before changing the service or generating a key.
-            if bind.port() == 0 {
-                bail!("daemon autostart requires a fixed, nonzero port");
-            }
-            ensure_managed_unit(&unit_file)?;
-            systemctl(&["show-environment"])?;
-            let binary = find_binary(binary.as_deref())?;
-            let config = AppConfig::load_optional(config_path)?;
-            let plugin_dirs = paths::plugin_dirs(&config, extra_dirs)?
-                .into_iter()
-                .map(|dir| absolute(&dir))
-                .collect::<Result<Vec<_>>>()?;
-            let config_path = absolute(config_path)?;
-            let t3_enabled = *t3 || settings.t3_mode == T3Mode::Auto;
-            let unit = render_unit(
-                &binary,
-                &config_path,
-                &plugin_dirs,
-                t3_enabled.then_some(key_file.as_path()),
-                *bind,
-            )?;
-            if t3_enabled {
-                ensure_key(&key_file)?;
-            }
-            write_atomic(&unit_file, &unit)?;
-            settings.t3_mode = T3Mode::from_enabled(t3_enabled);
-            settings.save(&settings_file)?;
-            systemctl(&["daemon-reload"])?;
-            // An app can supply a different XDG_CONFIG_HOME from the user
-            // manager. Enabling the absolute path also links the unit there.
-            systemctl(&[
-                "enable",
-                unit_file
-                    .to_str()
-                    .context("service unit path must be UTF-8")?,
-            ])?;
-            // Restart applies changed bind/config/plugin paths on repeated enable.
-            systemctl(&["restart", service])?;
-            let url = local_url(*bind);
-            wait_until_ready(&url).with_context(|| format!(
-                "daemon did not become ready; inspect `journalctl --user -u {service}` or disable the daemon"
-            ))?;
-            base_url = Some(url);
-        }
-        DaemonCommand::Disable { t3: true }
-        | DaemonCommand::Toggle { .. }
-        | DaemonCommand::T3 { .. } => {
-            ensure_managed_unit(&unit_file)?;
-            systemctl(&["show-environment"])?;
-            let mode = match command {
-                DaemonCommand::T3 { mode } => *mode,
-                DaemonCommand::Toggle { .. } => {
-                    T3Mode::from_enabled(settings.t3_mode == T3Mode::Off)
-                }
-                _ => T3Mode::Off,
-            };
-            let enabled = mode == T3Mode::Auto;
-            // Edit only the bridge argument, preserving the installed service's
-            // binary, bind address, config, plugin paths, and environment.
-            let updated = if old_unit.is_empty() {
-                None
-            } else {
-                Some(set_unit_t3(&old_unit, &key_file, enabled)?)
-            };
-            if enabled {
-                ensure_key(&key_file)?;
-            }
-            let updated = updated.filter(|(unit, _)| unit != &old_unit);
-            if let Some((unit, _)) = &updated {
-                write_atomic(&unit_file, unit)?;
-            }
-            settings.t3_mode = mode;
-            settings.save(&settings_file)?;
-            if let Some((_, bind)) = updated {
-                systemctl(&["daemon-reload"])?;
-                // Unlike restart, try-restart leaves a stopped daemon stopped.
-                systemctl(&["try-restart", service])?;
-                let state = systemctl(&["show", service, "--property=ActiveState", "--value"])?;
-                if String::from_utf8_lossy(&state.stdout).trim() == "active" {
-                    let url = local_url(bind);
-                    wait_until_ready(&url).with_context(|| {
-                        format!(
-                            "daemon did not become ready; inspect `journalctl --user -u {service}`"
-                        )
-                    })?;
-                    base_url = Some(url);
-                }
-            }
-        }
-        DaemonCommand::Disable { t3: false } => {
-            ensure_managed_unit(&unit_file)?;
-            // An absent service is already disabled. Still surface user-bus errors.
-            let state = systemctl(&["show", service, "--property=LoadState", "--value"])?;
-            settings.save(&settings_file)?;
-            if String::from_utf8_lossy(&state.stdout).trim() != "not-found" {
-                systemctl(&["disable", "--now", service])?;
-            }
-        }
-        DaemonCommand::Status => {}
-        DaemonCommand::Key => unreachable!(),
-    }
-    let status = service_status(service, unit_file, key_file, settings.t3_mode, base_url)?;
+    let manager = service::native()?;
+    let status = execute(command, config, extra_dirs, manager.as_ref())?;
     if json {
         println!("{}", serde_json::to_string_pretty(&status)?);
     } else {
@@ -318,10 +199,7 @@ pub fn run(
                 "disabled"
             }
         );
-        println!(
-            "Daemon: {}",
-            if status.running { "running" } else { "stopped" }
-        );
+        println!("Daemon: {}", status.condition);
         if let Some(url) = status.dashboard_url {
             println!("Dashboard URL: {url}");
         }
@@ -336,179 +214,351 @@ pub fn run(
         }
         if let Some(path) = status.management_key_file {
             println!("Management key file: {}", path.display());
-            println!(
-                "Show the key with: {} daemon key",
-                if dev_profile() {
-                    "usagestat-dev"
-                } else {
-                    "usagestat"
-                }
-            );
+        }
+        for diagnostic in status.diagnostics {
+            println!("{diagnostic}");
         }
     }
     Ok(())
 }
 
-fn systemctl(args: &[&str]) -> Result<Output> {
-    let output = Command::new("systemctl")
-        .arg("--user")
-        .args(args)
-        .output()
-        .context("run systemctl --user; a systemd user session is required")?;
-    if !output.status.success() {
-        bail!(
-            "systemctl --user {} failed: {}",
-            args.join(" "),
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
+fn execute(
+    command: &DaemonCommand,
+    config: Option<&Path>,
+    extra_dirs: &[PathBuf],
+    manager: &dyn ServiceManager,
+) -> Result<ServiceStatus> {
+    let _settings_lock = if matches!(command, DaemonCommand::Status) {
+        None
+    } else {
+        Some(
+            usagestat_core::storage::exclusive_lock(
+                &paths::config_dir()?.join("daemon-settings.lock"),
+            )
+            .context("another command is changing this profile's daemon settings")?,
+        )
+    };
+    let mut settings = load_settings(manager)?;
+    let key_file = settings
+        .installation
+        .as_ref()
+        .map(|i| i.management_key_file.clone())
+        .unwrap_or(paths::management_key_file()?);
+    let stored_path = settings_file()?;
+    match command {
+        DaemonCommand::Enable {
+            binary,
+            bind,
+            t3,
+            switch_owner,
+        } => {
+            manager.validate()?;
+            let binary = find_binary(binary.as_deref())?;
+            let owner = installation_owner(&binary)?;
+            if !switch_owner
+                && settings
+                    .installation
+                    .as_ref()
+                    .is_some_and(|old| old.owner != owner)
+            {
+                bail!(
+                    "another installation owns this profile ({}); use --switch-owner to transfer it",
+                    settings.installation.as_ref().unwrap().owner.display()
+                );
+            }
+            let bind = bind
+                .or_else(|| settings.installation.as_ref().map(|old| old.bind))
+                .unwrap_or_else(|| "127.0.0.1:6736".parse().unwrap());
+            if bind.port() == 0 {
+                bail!("daemon autostart requires a fixed, nonzero port");
+            }
+            let previous = manager.query()?;
+            let health = endpoint(&local_url(bind));
+            if health.occupied
+                && !(previous.running
+                    && settings
+                        .installation
+                        .as_ref()
+                        .is_some_and(|old| old.bind == bind))
+            {
+                bail!(
+                    "daemon address {bind} is occupied; preserve that process and choose another --bind address"
+                );
+            }
+            let config = absolute(
+                &config
+                    .map(Path::to_owned)
+                    .or_else(|| settings.installation.as_ref().map(|old| old.config.clone()))
+                    .unwrap_or(paths::config_file()?),
+            )?;
+            let app = AppConfig::load_optional(&config)?;
+            let plugin_dirs = if extra_dirs.is_empty() && settings.installation.is_some() {
+                settings.installation.as_ref().unwrap().plugin_dirs.clone()
+            } else {
+                paths::plugin_dirs(&app, extra_dirs)?
+                    .iter()
+                    .map(|dir| absolute(dir))
+                    .collect::<Result<Vec<_>>>()?
+            };
+            let mut environment = settings
+                .installation
+                .as_ref()
+                .map(|old| old.environment.clone())
+                .unwrap_or_default();
+            for name in [
+                "PATH",
+                "HOME",
+                "USERPROFILE",
+                "APPDATA",
+                "LOCALAPPDATA",
+                "XDG_CONFIG_HOME",
+                "XDG_DATA_HOME",
+                "USAGESTAT_HELPER_PATH",
+            ] {
+                if let Ok(value) = std::env::var(name) {
+                    environment.insert(name.to_owned(), value);
+                }
+            }
+            for (name, path) in [
+                ("USAGESTAT_CONFIG_DIR", paths::config_dir()?),
+                ("USAGESTAT_DATA_DIR", paths::data_dir()?),
+            ] {
+                environment.insert(
+                    name.to_owned(),
+                    absolute(&path)?
+                        .to_str()
+                        .context("service paths must be UTF-8")?
+                        .to_owned(),
+                );
+            }
+            if *t3 {
+                settings.t3_mode = SavedT3Mode::Auto;
+            }
+            settings.installation = Some(Installation {
+                owner,
+                binary,
+                bind,
+                config,
+                plugin_dirs,
+                environment,
+                management_key_file: key_file.clone(),
+                control_key_file: paths::control_key_file()?,
+            });
+            let install = settings.installation.as_ref().unwrap();
+            ensure_key(&install.control_key_file)?;
+            if settings.t3_mode == SavedT3Mode::Auto {
+                ensure_key(&key_file)?;
+            }
+            settings.save(&stored_path)?;
+            manager.install(install, &stored_path)?;
+            manager.enable()?;
+            wait_for_installation(install)?;
+        }
+        DaemonCommand::Disable { t3: true }
+        | DaemonCommand::Toggle { .. }
+        | DaemonCommand::T3 { .. } => {
+            let mode = match command {
+                DaemonCommand::T3 { mode } => (*mode).into(),
+                DaemonCommand::Toggle { .. } if settings.t3_mode == SavedT3Mode::Off => {
+                    SavedT3Mode::Auto
+                }
+                _ => SavedT3Mode::Off,
+            };
+            if apply_t3(&mut settings, mode, &stored_path, &key_file, manager)? {
+                wait_for_installation(settings.installation.as_ref().unwrap())?;
+            }
+        }
+        DaemonCommand::Disable { t3: false } => {
+            manager.validate()?;
+            settings.save(&stored_path)?;
+            manager.disable()?;
+        }
+        DaemonCommand::Status => {}
+        DaemonCommand::Key => unreachable!(),
     }
-    Ok(output)
+    service_status(manager, &settings)
 }
 
-fn service_status(
-    service: &'static str,
-    unit_file: PathBuf,
-    management_key_file: PathBuf,
-    t3_mode: T3Mode,
-    base_url: Option<String>,
-) -> Result<ServiceStatus> {
-    let output = systemctl(&["show", service, "--property=ActiveState,UnitFileState"])?;
-    let properties = String::from_utf8_lossy(&output.stdout);
-    let running = properties.lines().any(|line| line == "ActiveState=active");
-    let unit = read_optional_unit(&unit_file)?;
-    let base_url = base_url.or_else(|| {
-        unit.starts_with(MARKER)
-            .then(|| unit_bind(&unit).ok().map(local_url))
-            .flatten()
-    });
-    // Auto is a saved preference, not evidence of a working connection. Check
-    // the authenticated endpoint before advertising the bridge as available.
-    let t3_available = t3_mode == T3Mode::Auto
-        && running
-        && base_url
-            .as_ref()
-            .is_some_and(|url| quota_endpoint_available(url, &management_key_file));
-    Ok(ServiceStatus {
-        service,
-        autostart: properties
-            .lines()
-            .any(|line| line == "UnitFileState=enabled"),
-        running,
-        unit_file,
-        t3_mode,
-        t3_available,
-        management_key_file: (t3_mode == T3Mode::Auto).then_some(management_key_file),
-        dashboard_url: base_url
-            .as_ref()
-            .filter(|_| running)
-            .map(|url| format!("{url}/dashboard")),
-        hub_url: base_url.filter(|_| t3_available),
+fn apply_t3(
+    settings: &mut DaemonSettings,
+    mode: SavedT3Mode,
+    stored_path: &Path,
+    key_file: &Path,
+    manager: &dyn ServiceManager,
+) -> Result<bool> {
+    let previous = if settings.installation.is_some() {
+        manager.validate()?;
+        Some(manager.query()?)
+    } else {
+        None
+    };
+    if mode == SavedT3Mode::Auto {
+        ensure_key(key_file)?;
+    }
+    if let Some(install) = &settings.installation {
+        ensure_key(&install.control_key_file)?;
+    }
+    settings.t3_mode = mode;
+    settings.save(stored_path)?;
+    if let Some(install) = &settings.installation {
+        manager.install(install, stored_path)?;
+        if previous.is_some_and(|state| state.running) {
+            manager.restart()?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn installation_owner(binary: &Path) -> Result<PathBuf> {
+    if binary
+        .components()
+        .any(|c| c.as_os_str() == "_npx" || c.as_os_str() == "_cacache")
+    {
+        bail!(
+            "temporary npm execution cannot own autostart; install globally or use a durable native installation"
+        );
+    }
+    // Homebrew changes the versioned Cellar path during upgrades, while its
+    // package directory remains the same installation owner.
+    let mut prefix = PathBuf::new();
+    let mut cellar = false;
+    for component in binary.components() {
+        prefix.push(component.as_os_str());
+        if cellar {
+            return Ok(prefix);
+        }
+        cellar = component.as_os_str() == "Cellar";
+    }
+    let directory = binary
+        .parent()
+        .context("daemon executable has no installation directory")?;
+    Ok(if directory.file_name().is_some_and(|name| name == "bin") {
+        directory.parent().unwrap_or(directory).to_owned()
+    } else {
+        directory.to_owned()
     })
 }
 
-fn read_optional_unit(path: &Path) -> Result<String> {
-    match fs::read_to_string(path) {
-        Ok(unit) => Ok(unit),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-        Err(e) => Err(e).context("read daemon service configuration"),
-    }
+#[derive(Default)]
+struct Endpoint {
+    occupied: bool,
+    healthy: bool,
+    version: Option<String>,
+    owner: Option<PathBuf>,
 }
-
-fn unit_enables_t3(unit: &str, key: &Path) -> Result<bool> {
-    let argument = format!(" --management-key-file {}", path_arg(key)?);
-    Ok(unit.starts_with(MARKER)
-        && unit
-            .lines()
-            .any(|line| line.starts_with("ExecStart=") && line.contains(&argument)))
-}
-
-// Split the generated ExecStart syntax while retaining quoting and escaping.
-// Tokens stay encoded for systemd; they are never evaluated by a shell.
-fn unit_words(command: &str) -> Result<Vec<&str>> {
-    let mut words = Vec::new();
-    let mut start = None;
-    let mut quote = None;
-    let mut escaped = false;
-    for (i, c) in command.char_indices() {
-        if escaped {
-            escaped = false;
-        } else if c == '\\' {
-            escaped = true;
-        } else if let Some(delimiter) = quote {
-            if c == delimiter {
-                quote = None;
-            }
-        } else if c == '"' || c == '\'' {
-            quote = Some(c);
-        } else if c.is_whitespace() {
-            if let Some(begin) = start.take() {
-                words.push(&command[begin..i]);
-            }
-            continue;
-        }
-        start.get_or_insert(i);
-    }
-    if quote.is_some() || escaped {
-        bail!("invalid quoting in managed daemon service");
-    }
-    if let Some(begin) = start {
-        words.push(&command[begin..]);
-    }
-    Ok(words)
-}
-
-fn unit_command(unit: &str) -> Result<&str> {
-    let commands: Vec<_> = unit
-        .lines()
-        .filter_map(|line| line.strip_prefix("ExecStart="))
-        .collect();
-    let [command] = commands.as_slice() else {
-        bail!("expected one ExecStart in managed daemon service");
-    };
-    Ok(command)
-}
-
-fn unit_bind(unit: &str) -> Result<SocketAddr> {
-    let words = unit_words(unit_command(unit)?)?;
-    words
-        .windows(2)
-        .find(|pair| pair[0] == "--bind")
-        .context("managed daemon service is missing its bind address")?[1]
-        .parse()
-        .context("invalid bind address in managed daemon service")
-}
-
-fn set_unit_t3(unit: &str, key: &Path, enabled: bool) -> Result<(String, SocketAddr)> {
-    let mut words = unit_words(unit_command(unit)?)?;
-    let bind = unit_bind(unit)?;
-    let key_arg = path_arg(key)?;
-    if let Some(index) = words
-        .iter()
-        .position(|word| *word == "--management-key-file")
+fn endpoint(url: &str) -> Endpoint {
+    let mut result = Endpoint::default();
+    if let Some(address) = url
+        .strip_prefix("http://")
+        .and_then(|s| s.parse::<SocketAddr>().ok())
     {
-        if words.get(index + 1) != Some(&key_arg.as_str()) {
-            bail!("managed daemon service uses an unexpected management key path");
-        }
-        if !enabled {
-            words.drain(index..index + 2);
-        }
-    } else if enabled {
-        words.extend(["--management-key-file", &key_arg]);
+        result.occupied = TcpStream::connect_timeout(&address, Duration::from_millis(250)).is_ok();
     }
-    let command = format!("ExecStart={}", words.join(" "));
-    let mut updated = String::new();
-    for line in unit.lines() {
-        updated.push_str(if line.starts_with("ExecStart=") {
-            &command
-        } else {
-            line
-        });
-        updated.push('\n');
-        if line == "[Service]" && !unit.contains("\nUnsetEnvironment=USAGESTAT_MANAGEMENT_KEY\n") {
-            updated.push_str("UnsetEnvironment=USAGESTAT_MANAGEMENT_KEY\n");
-        }
+    let read = || -> Result<serde_json::Value> {
+        Ok(local_client(Duration::from_secs(1))?
+            .get(format!("{url}/health"))
+            .send()?
+            .error_for_status()?
+            .json()?)
+    };
+    if let Ok(body) = read() {
+        result.occupied = true;
+        result.healthy = body["status"] == "ok" && body["application"] == "usagestat";
+        result.version = body["version"].as_str().map(str::to_owned);
+        result.owner = body["owner"].as_str().map(PathBuf::from);
     }
-    Ok((updated, bind))
+    result
+}
+
+fn service_status(
+    manager: &dyn ServiceManager,
+    settings: &DaemonSettings,
+) -> Result<ServiceStatus> {
+    let mut diagnostics = Vec::new();
+    let (registration, manager_available) = match manager.query() {
+        Ok(registration) => (registration, manager.available()),
+        Err(error) => {
+            diagnostics.push(error.to_string());
+            (Registration::default(), false)
+        }
+    };
+    let url = settings
+        .installation
+        .as_ref()
+        .map(Installation::base_url)
+        .unwrap_or_else(|| "http://127.0.0.1:6736".to_owned());
+    let health = endpoint(&url);
+    let owned = settings
+        .installation
+        .as_ref()
+        .is_some_and(|install| health.owner.as_ref() == Some(&install.owner));
+    let condition = if health.occupied && !health.healthy {
+        "port-conflict"
+    } else if health.healthy && health.version.as_deref() != Some(env!("CARGO_PKG_VERSION")) {
+        "wrong-version"
+    } else if health.healthy && !owned {
+        "external"
+    } else if health.healthy {
+        "healthy"
+    } else if registration.running {
+        "starting"
+    } else if !manager_available {
+        "manager-unavailable"
+    } else if registration.registered {
+        "stopped"
+    } else {
+        "unregistered"
+    };
+    let running = registration.running || health.healthy;
+    let key_file = settings
+        .installation
+        .as_ref()
+        .map(|i| i.management_key_file.clone())
+        .unwrap_or(paths::management_key_file()?);
+    let t3_available = settings.t3_mode == SavedT3Mode::Auto
+        && health.healthy
+        && quota_endpoint_available(&url, &key_file);
+    Ok(ServiceStatus {
+        service: manager.name(),
+        manager: manager.kind(),
+        manager_available,
+        configured: settings.installation.is_some(),
+        registered: registration.registered,
+        autostart: registration.enabled,
+        running,
+        healthy: health.healthy,
+        condition,
+        unit_file: manager.file(),
+        owner: settings.installation.as_ref().map(|i| i.owner.clone()),
+        backend_version: health.version,
+        diagnostics,
+        t3_mode: settings.t3_mode.into(),
+        t3_available,
+        management_key_file: (settings.t3_mode == SavedT3Mode::Auto).then_some(key_file),
+        dashboard_url: health.healthy.then(|| format!("{url}/dashboard")),
+        hub_url: t3_available.then_some(url),
+    })
+}
+
+fn wait_for_installation(installation: &Installation) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let health = endpoint(&installation.base_url());
+        if health.healthy
+            && health.version.as_deref() == Some(env!("CARGO_PKG_VERSION"))
+            && health.owner.as_ref() == Some(&installation.owner)
+        {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            bail!(
+                "owned daemon did not become ready at {}; inspect service status or disable it",
+                installation.base_url()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }
 
 fn absolute(path: &Path) -> Result<PathBuf> {
@@ -554,17 +604,6 @@ fn find_binary(explicit: Option<&Path>) -> Result<PathBuf> {
     )
 }
 
-fn ensure_managed_unit(path: &Path) -> Result<()> {
-    match fs::read_to_string(path) {
-        Ok(text) if !text.starts_with(MARKER) => bail!(
-            "{} is not managed by usagestat; preserve or move that service before using this command",
-            path.display()
-        ),
-        Err(e) if e.kind() != std::io::ErrorKind::NotFound => return Err(e.into()),
-        _ => Ok(()),
-    }
-}
-
 fn read_key(path: &Path) -> Result<String> {
     let key = usagestat_core::storage::read_private(path)?
         .trim()
@@ -587,87 +626,9 @@ fn ensure_key(path: &Path) -> Result<String> {
     read_key(path)
 }
 
-// systemd unit quoting is not shell quoting. Percent specifiers and (for
-// ExecStart only) dollar expansion must also be escaped, even inside quotes.
-fn unit_quote(value: &str, exec: bool) -> Result<String> {
-    if value.chars().any(|c| c.is_control()) {
-        bail!("service paths and environment values must not contain control characters");
-    }
-    let value = value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('%', "%%");
-    Ok(format!(
-        "\"{}\"",
-        if exec {
-            value.replace('$', "$$")
-        } else {
-            value
-        }
-    ))
-}
-
-fn path_arg(path: &Path) -> Result<String> {
-    unit_quote(
-        path.to_str().context("service paths must be valid UTF-8")?,
-        true,
-    )
-}
-
-fn render_unit(
-    binary: &Path,
-    config: &Path,
-    plugin_dirs: &[PathBuf],
-    key: Option<&Path>,
-    bind: SocketAddr,
-) -> Result<String> {
-    let mut command = format!(
-        "{} --bind {} --config {}",
-        path_arg(binary)?,
-        bind,
-        path_arg(config)?
-    );
-    if let Some(key) = key {
-        command.push_str(&format!(" --management-key-file {}", path_arg(key)?));
-    }
-    for dir in plugin_dirs {
-        command.push_str(&format!(" --plugin-dir {}", path_arg(dir)?));
-    }
-    let mut environment = String::new();
-    // Preserve CLI discovery and XDG locations; never persist the invoking
-    // process's full environment (it can contain provider credentials).
-    for name in ["PATH", "XDG_CONFIG_HOME", "XDG_DATA_HOME"] {
-        if let Ok(value) = std::env::var(name) {
-            environment.push_str(&format!(
-                "Environment={}\n",
-                unit_quote(&format!("{name}={value}"), false)?
-            ));
-        }
-    }
-    let env_file = paths::config_dir()?.join("daemon.env");
-    let env_file = unit_quote(
-        env_file
-            .to_str()
-            .context("environment file path must be UTF-8")?,
-        false,
-    )?;
-    Ok(format!(
-        "{MARKER}[Unit]\nDescription=usagestat usage backend\n\n[Service]\nType=exec\nExecStart={command}\nWorkingDirectory=%h\n{environment}EnvironmentFile=-{env_file}\nUnsetEnvironment=USAGESTAT_MANAGEMENT_KEY\nRestart=on-failure\nRestartSec=5\nUMask=0077\n\n[Install]\nWantedBy=default.target\n"
-    ))
-}
-
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     usagestat_core::storage::write_atomic(path, contents.as_bytes())?;
     Ok(())
-}
-
-fn local_url(bind: SocketAddr) -> String {
-    let ip = match bind.ip() {
-        IpAddr::V4(ip) if ip.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        IpAddr::V6(ip) if ip.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
-        ip => ip,
-    };
-    format!("http://{}", SocketAddr::new(ip, bind.port()))
 }
 
 fn local_client(timeout: Duration) -> Result<reqwest::blocking::Client> {
@@ -696,30 +657,11 @@ fn quota_endpoint_available(url: &str, key_file: &Path) -> bool {
     check().unwrap_or(false)
 }
 
-fn wait_until_ready(url: &str) -> Result<()> {
-    let client = local_client(Duration::from_secs(1))?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Ok(response) = client.get(format!("{url}/health")).send() {
-            if response.status().is_success() {
-                let body: serde_json::Value = response.json()?;
-                if body.get("status").and_then(|status| status.as_str()) == Some("ok") {
-                    return Ok(());
-                }
-            }
-        }
-        if Instant::now() >= deadline {
-            bail!("daemon health endpoint is not responding at {url}/health");
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use super::systemd::*;
     use super::*;
     use std::io::Write;
-
     fn temp_dir() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let dir = std::env::temp_dir().join(format!(
@@ -797,88 +739,6 @@ mod tests {
         assert!(unit.contains("\nUnsetEnvironment=USAGESTAT_MANAGEMENT_KEY\n"));
         assert_eq!(fs::read_to_string(&key).unwrap(), "invalid old key\n");
         fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn remembers_t3_preference_and_migrates_existing_services() {
-        let dir = temp_dir();
-        let path = dir.join("daemon.json");
-        let key = dir.join("key");
-        let unit = render_unit(
-            Path::new("/usr/bin/usagestatd"),
-            Path::new("/config.toml"),
-            &[],
-            Some(&key),
-            "127.0.0.1:6736".parse().unwrap(),
-        )
-        .unwrap();
-        assert_eq!(
-            DaemonSettings::load(&path, "", &key).unwrap().t3_mode,
-            T3Mode::Off
-        );
-        let mut settings = DaemonSettings::load(&path, &unit, &key).unwrap();
-        assert_eq!(settings.t3_mode, T3Mode::Auto);
-        settings.save(&path).unwrap();
-        // The saved preference survives even if a service has not been installed.
-        assert_eq!(
-            DaemonSettings::load(&path, "", &key).unwrap().t3_mode,
-            T3Mode::Auto
-        );
-        settings.t3_mode = T3Mode::Off;
-        settings.save(&path).unwrap();
-        assert_eq!(
-            DaemonSettings::load(&path, &unit, &key).unwrap().t3_mode,
-            T3Mode::Off
-        );
-        assert_eq!(
-            serde_json::from_str::<serde_json::Value>(&fs::read_to_string(&path).unwrap()).unwrap(),
-            serde_json::json!({"t3Mode": "off"})
-        );
-        // Boolean preferences from older builds migrate without losing state.
-        for enabled in [false, true] {
-            fs::write(&path, serde_json::json!({"t3Enabled": enabled}).to_string()).unwrap();
-            assert_eq!(
-                DaemonSettings::load(&path, "", &key).unwrap().t3_mode,
-                T3Mode::from_enabled(enabled)
-            );
-        }
-        fs::write(&path, r#"{"t3Mode":"invalid","t3Enabled":true}"#).unwrap();
-        assert!(DaemonSettings::load(&path, &unit, &key).is_err());
-        fs::write(&path, "invalid json").unwrap();
-        assert!(DaemonSettings::load(&path, &unit, &key).is_err());
-        fs::remove_dir_all(dir).unwrap();
-    }
-
-    #[test]
-    fn changing_t3_preserves_custom_service_settings_and_quoted_paths() {
-        let key = Path::new("/config %h/$VAR/\"key\"");
-        let unit = render_unit(
-            Path::new("/my --bind invalid/工具/usagestatd"),
-            Path::new("/config --management-key-file \"/key\".toml"),
-            &[PathBuf::from("/my \\ plugins/$VAR/%h")],
-            None,
-            "[::1]:7345".parse().unwrap(),
-        )
-        .unwrap();
-        let (enabled, bind) = set_unit_t3(&unit, key, true).unwrap();
-        assert_eq!(bind.to_string(), "[::1]:7345");
-        assert!(unit_enables_t3(&enabled, key).unwrap());
-        assert_eq!(set_unit_t3(&enabled, key, true).unwrap().0, enabled);
-        let (disabled, _) = set_unit_t3(&enabled, key, false).unwrap();
-        assert_eq!(disabled, unit);
-        assert_eq!(set_unit_t3(&disabled, key, false).unwrap().0, disabled);
-        assert!(set_unit_t3(&enabled, Path::new("/different-key"), false).is_err());
-        assert!(unit_words("\"unterminated").is_err());
-        // Older generated services also get protection from inherited env keys.
-        let old_unit = enabled.replace("UnsetEnvironment=USAGESTAT_MANAGEMENT_KEY\n", "");
-        assert_eq!(
-            set_unit_t3(&old_unit, key, false)
-                .unwrap()
-                .0
-                .matches("UnsetEnvironment=USAGESTAT_MANAGEMENT_KEY")
-                .count(),
-            1
-        );
     }
 
     #[test]
@@ -987,32 +847,5 @@ mod tests {
         ] {
             assert_eq!(local_url(bind.parse().unwrap()), expected);
         }
-    }
-
-    #[test]
-    fn readiness_uses_native_health_without_a_key_or_provider_initialization() {
-        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let url = format!("http://{}", listener.local_addr().unwrap());
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let mut reader = std::io::BufReader::new(&mut stream);
-            let mut request = String::new();
-            loop {
-                let mut line = String::new();
-                std::io::BufRead::read_line(&mut reader, &mut line).unwrap();
-                request.push_str(&line);
-                if line == "\r\n" {
-                    break;
-                }
-            }
-            assert!(!request.to_ascii_lowercase().contains("authorization:"));
-            assert!(request.starts_with("GET /health "));
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 15\r\nConnection: close\r\n\r\n{\"status\":\"ok\"}").unwrap();
-        });
-        wait_until_ready(&url).unwrap();
-        server.join().unwrap();
     }
 }

@@ -21,12 +21,17 @@ use std::time::{Duration, Instant};
 use usagestat_plugins::{discover_providers, probe_provider};
 
 mod cliproxy;
+mod control;
 mod http_request;
 
 #[derive(Debug, Parser)]
 #[command(name = "usagestatd")]
 #[command(about = "Local agent usage polling daemon")]
 struct Cli {
+    /// Run the saved per-user service configuration.
+    #[arg(long, value_name = "PATH")]
+    service_settings: Option<PathBuf>,
+
     #[arg(long, default_value = "127.0.0.1:6736")]
     bind: String,
 
@@ -43,18 +48,53 @@ struct Cli {
     /// Alternatively, set USAGESTAT_MANAGEMENT_KEY.
     #[arg(long, value_name = "PATH")]
     management_key_file: Option<PathBuf>,
+
+    /// Separate credential for authenticated lifecycle control.
+    #[arg(long, value_name = "PATH")]
+    control_key_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Default)]
 struct AppState {
     cache: UsageCache,
     providers: Vec<ProviderSummary>,
+    identity: Option<JsonValue>,
+    control: control::ControlApi,
 }
 
 fn main() -> Result<()> {
+    let mut cli = Cli::parse();
+    let mut owner = None;
+    if let Some(path) = &cli.service_settings {
+        use usagestat_core::daemon_settings::{DaemonSettings, T3Mode};
+        let settings = DaemonSettings::load(path)?.context("daemon settings are missing")?;
+        let installation = settings
+            .installation
+            .context("daemon installation is not configured")?;
+        cli.bind = installation.bind.to_string();
+        cli.config = Some(installation.config);
+        cli.plugin_dirs = installation.plugin_dirs;
+        cli.management_key_file =
+            (settings.t3_mode == T3Mode::Auto).then_some(installation.management_key_file);
+        cli.control_key_file = Some(installation.control_key_file);
+        owner = Some(installation.owner);
+        // This is the binary's single-threaded entry, before logging, signals,
+        // HTTP clients or provider workers can read environment variables.
+        unsafe {
+            std::env::remove_var("USAGESTAT_MANAGEMENT_KEY");
+            for (name, value) in installation.environment {
+                if name.is_empty() || name.contains(['=', '\0']) || value.contains('\0') {
+                    anyhow::bail!("invalid environment entry in daemon settings");
+                }
+                if name != "USAGESTAT_MANAGEMENT_KEY" {
+                    std::env::set_var(name, value);
+                }
+            }
+        }
+    }
     env_logger::init();
-    let cli = Cli::parse();
     let shutdown = usagestat_core::signals::register()?;
+    let control = control::ControlApi::load(cli.control_key_file.as_deref(), shutdown.clone())?;
     let management = cliproxy::ManagementApi::load(cli.management_key_file.as_deref())?;
     let config_path = match cli.config.clone() {
         Some(path) => path,
@@ -65,6 +105,12 @@ fn main() -> Result<()> {
     let refresh_sec = cli.refresh_sec.unwrap_or(config.refresh_sec);
     let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs)?;
     let cache_path = paths::cache_file()?;
+    let _profile_lock = usagestat_core::storage::exclusive_lock(
+        &paths::data_dir()?.join("daemon.lock"),
+    )
+    .context(
+        "acquire daemon profile lock; stop its existing daemon or choose another data directory",
+    )?;
     let history_path = paths::data_dir()?.join("history.jsonl");
     let cache = UsageCache::load_optional(&cache_path)
         .with_context(|| format!("load cache {}", cache_path.display()))?;
@@ -72,6 +118,11 @@ fn main() -> Result<()> {
     let state = Arc::new(Mutex::new(AppState {
         cache,
         providers: Vec::new(),
+        identity: Some(json!({
+            "application": "usagestat", "version": env!("CARGO_PKG_VERSION"),
+            "pid": std::process::id(), "profile": paths::app_dir_name(), "owner": owner,
+        })),
+        control,
     }));
     let refresh_flag = Arc::new(AtomicBool::new(false));
 
@@ -212,9 +263,16 @@ fn handle_connection(
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let response = match http_request::read_request(&mut stream) {
-        Ok(request) => management
-            .route(&request, &state)
-            .unwrap_or_else(|| route(&request.method, &request.path, &state, &refresh_flag)),
+        Ok(request) => {
+            let controlled = state
+                .lock()
+                .expect("app state poisoned")
+                .control
+                .route(&request);
+            controlled
+                .or_else(|| management.route(&request, &state))
+                .unwrap_or_else(|| route(&request.method, &request.path, &state, &refresh_flag))
+        }
         Err(_) => response_json(400, "Bad Request", r#"{"error":"invalid_request"}"#),
     };
     let _ = stream.write_all(response.as_bytes());
@@ -246,7 +304,14 @@ fn route(
     }
 
     if path == "/health" {
-        return response_json(200, "OK", r#"{"status":"ok"}"#);
+        let mut body = state
+            .lock()
+            .expect("app state poisoned")
+            .identity
+            .clone()
+            .unwrap_or_else(|| json!({}));
+        body["status"] = json!("ok");
+        return response_json(200, "OK", &body.to_string());
     }
 
     if path == "/dashboard" || path == "/" {

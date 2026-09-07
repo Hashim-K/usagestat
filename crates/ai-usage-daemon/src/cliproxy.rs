@@ -91,7 +91,7 @@ impl ManagementApi {
     }
 }
 
-fn keys_equal(expected: &str, supplied: &str) -> bool {
+pub(crate) fn keys_equal(expected: &str, supplied: &str) -> bool {
     // Verify fixed-size MACs in constant time instead of comparing key prefixes.
     fn mac(key: &str) -> Hmac<Sha256> {
         let mut mac = Hmac::<Sha256>::new_from_slice(b"usagestat management authentication")

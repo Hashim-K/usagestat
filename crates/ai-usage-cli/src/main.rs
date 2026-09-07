@@ -81,7 +81,7 @@ enum Command {
         #[arg(long, value_name = "ADDRESS:PORT")]
         bind: Option<std::net::SocketAddr>,
     },
-    /// Manage the optional background daemon and startup at login (Linux/systemd)
+    /// Manage the optional per-user daemon and startup at login
     Daemon {
         #[command(subcommand)]
         command: daemon::DaemonCommand,
@@ -414,7 +414,7 @@ fn run_cli() -> Result<()> {
         return dashboard::run(*url, *bind, json);
     }
     if let Some(Command::Daemon { command }) = &cli.command {
-        return daemon::run(command, &config_path, &cli.plugin_dirs, json);
+        return daemon::run(command, cli.config.as_deref(), &cli.plugin_dirs, json);
     }
     let config = AppConfig::load_optional(&config_path)
         .with_context(|| format!("load config {}", config_path.display()))?;

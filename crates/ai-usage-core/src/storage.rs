@@ -261,6 +261,26 @@ pub fn temporary_directory() -> io::Result<tempfile::TempDir> {
     Ok(directory)
 }
 
+/// Hold a kernel lock for an application-owned process identity. Never unlink
+/// this file while running: another process could otherwise lock a new inode.
+pub fn exclusive_lock(path: &Path) -> io::Result<File> {
+    create_missing_directories(parent(path)?)?;
+    reject_link(path)?;
+    let mut options = OpenOptions::new();
+    options.read(true).write(true).create(true);
+    no_follow(&mut options);
+    let file = options.open(path)?;
+    validate_file(&file)?;
+    file.try_lock().map_err(|error| match error {
+        std::fs::TryLockError::WouldBlock => io::Error::new(
+            io::ErrorKind::WouldBlock,
+            "private state is already locked by another process",
+        ),
+        std::fs::TryLockError::Error(error) => error,
+    })?;
+    Ok(file)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
