@@ -114,6 +114,10 @@ fn protect_directory(path: &Path) -> io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::{FILE_READ_ATTRIBUTES, READ_CONTROL, WRITE_DAC};
+        // Open directories with the ACL rights up front. ReOpenFile is useful
+        // for tempfile's file handles, but fails on native directory handles.
+        options.access_mode(FILE_READ_ATTRIBUTES.0 | READ_CONTROL.0 | WRITE_DAC.0);
         options.custom_flags(0x0200_0000 | 0x0020_0000); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
     }
     let file = options.open(path).map_err(|error| {

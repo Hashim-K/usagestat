@@ -80,27 +80,29 @@ pub(super) fn protect(file: &File, directory: bool) -> io::Result<()> {
     let sid = current_sid()?;
     // Reopen the same file object with WRITE_DAC; never reopen a temporary by
     // pathname between its creation and the first secret write.
-    let flags = if directory {
-        FILE_FLAG_BACKUP_SEMANTICS
+    let reopened = if directory {
+        None // protect_directory already opened with READ_CONTROL | WRITE_DAC.
     } else {
-        FILE_FLAGS_AND_ATTRIBUTES(0)
+        Some(OwnedHandle(
+            unsafe {
+                ReOpenFile(
+                    HANDLE(file.as_raw_handle()),
+                    READ_CONTROL.0 | WRITE_DAC.0,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    FILE_FLAGS_AND_ATTRIBUTES(0),
+                )
+            }
+            .map_err(|error| context("reopen private object for ACL update", error))?,
+        ))
     };
-    let handle = OwnedHandle(
-        unsafe {
-            ReOpenFile(
-                HANDLE(file.as_raw_handle()),
-                READ_CONTROL.0 | WRITE_DAC.0,
-                FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-                flags,
-            )
-        }
-        .map_err(|error| context("reopen private object for ACL update", error))?,
-    );
+    let handle = reopened
+        .as_ref()
+        .map_or(HANDLE(file.as_raw_handle()), |h| h.0);
     let mut owner = PSID::default();
     let mut owner_descriptor = PSECURITY_DESCRIPTOR::default();
     unsafe {
         GetSecurityInfo(
-            handle.0,
+            handle,
             SE_FILE_OBJECT,
             OWNER_SECURITY_INFORMATION,
             Some(&mut owner),
@@ -148,7 +150,7 @@ pub(super) fn protect(file: &File, directory: bool) -> io::Result<()> {
     }
     unsafe {
         SetSecurityInfo(
-            handle.0,
+            handle,
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
             None,

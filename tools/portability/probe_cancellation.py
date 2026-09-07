@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Credential-free CLI probe deadline, allowlist, and Unix signal integration."""
+"""Credential-free probe deadline, allowlist, and CLI/daemon shutdown integration."""
 from __future__ import annotations
 
 import argparse
@@ -89,39 +89,33 @@ globalThis.__usagestat_plugin = { probe(ctx) {
                 assert_stopped(read_address(ready, time.monotonic() + 1))
             result["checks"].append(mode)
 
-        if os.name != "nt":
-            env["USAGESTAT_PROBE_TIMEOUT_SEC"] = "30"
-            for signum in [signal.SIGINT, signal.SIGTERM]:
-                ready = configure("helper", signum.name)
-                child = subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, start_new_session=True)
+        env["USAGESTAT_PROBE_TIMEOUT_SEC"] = "30"
+        daemon = binary.with_name("usagestatd.exe" if os.name == "nt" else "usagestatd")
+        # Port zero asks the OS for a free port. The fixture reports its helper
+        # address independently, so the test never needs to discover the API port.
+        daemon_argv = [str(daemon), "--bind", "127.0.0.1:0", "--plugin-dir", str(plugins.parent)]
+        events = ["ctrl-c", "ctrl-break", "close"] if os.name == "nt" else [signal.SIGINT, signal.SIGTERM]
+        for name, command, expected_code in [("cli", argv, 130), ("daemon", daemon_argv, 0)]:
+            for event in events:
+                event_name = str(event) if os.name == "nt" else event.name
+                ready = configure("helper", name + "-" + event_name)
+                options = ({"creationflags": subprocess.CREATE_NEW_CONSOLE} if os.name == "nt"
+                           else {"start_new_session": True})
+                child = subprocess.Popen(command, cwd=root, env=env, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, **options)
                 try:
                     address = read_address(ready, time.monotonic() + 8)
-                    child.send_signal(signum)
-                    _, stderr = child.communicate(timeout=5)
-                    assert child.returncode == 130, (child.returncode, stderr)
-                    assert_stopped(address)
-                    result["checks"].append(signum.name)
-                finally:
-                    if child.poll() is None:
-                        child.kill()
-                        child.wait(timeout=5)
-        else:
-            env["USAGESTAT_PROBE_TIMEOUT_SEC"] = "30"
-            for event in ["ctrl-c", "ctrl-break", "close"]:
-                ready = configure("helper", event)
-                child = subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.PIPE,
-                                         stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NEW_CONSOLE)
-                try:
-                    address = read_address(ready, time.monotonic() + 8)
-                    sender = subprocess.run([sys.executable, str(Path(__file__).with_name("windows_console.py")),
-                                             str(child.pid), event], capture_output=True, timeout=5)
-                    # Closing that console can also terminate its sender.
-                    assert sender.returncode == 0 or event == "close", sender.stderr
+                    if os.name == "nt":
+                        sender = subprocess.run([sys.executable, str(Path(__file__).with_name("windows_console.py")),
+                                                 str(child.pid), event], capture_output=True, timeout=5)
+                        # Closing that console can also terminate its sender.
+                        assert sender.returncode == 0 or event == "close", sender.stderr
+                    else:
+                        child.send_signal(event)
                     _, stderr = child.communicate(timeout=6)
-                    assert child.returncode == 130, (event, child.returncode, stderr)
+                    assert child.returncode == expected_code, (name, event_name, child.returncode, stderr)
                     assert_stopped(address)
-                    result["checks"].append(event)
+                    result["checks"].append(name + ":" + event_name)
                 finally:
                     if child.poll() is None:
                         child.kill()

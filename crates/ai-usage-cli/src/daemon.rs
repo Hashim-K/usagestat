@@ -717,8 +717,8 @@ fn wait_until_ready(url: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::Write;
     use super::*;
+    use std::io::Write;
 
     fn temp_dir() -> PathBuf {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);

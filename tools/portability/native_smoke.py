@@ -62,7 +62,7 @@ def check_snapshot(snapshots: list[dict], nonce: str) -> None:
     assert snapshot["providerId"] == "native-smoke", snapshot
     assert not snapshot.get("error"), snapshot
     metrics = {metric["label"]: metric for metric in snapshot["metrics"]}
-    assert metrics["Fixture"]["used"] == 42, snapshot
+    assert metrics.get("Fixture", {}).get("used") == 42, snapshot
     assert metrics["Fixture"]["limit"] == 100, snapshot
     assert metrics["Nonce"]["value"] == nonce, snapshot
     expected_os = {"Darwin": "macos", "Windows": "windows", "Linux": "linux"}[platform.system()]

@@ -54,6 +54,7 @@ struct AppState {
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
+    let shutdown = usagestat_core::signals::register()?;
     let management = cliproxy::ManagementApi::load(cli.management_key_file.as_deref())?;
     let config_path = match cli.config.clone() {
         Some(path) => path,
@@ -74,7 +75,10 @@ fn main() -> Result<()> {
     }));
     let refresh_flag = Arc::new(AtomicBool::new(false));
 
-    start_poller(
+    // A conflicting listener must fail before any provider is started.
+    let listener =
+        TcpListener::bind(&cli.bind).with_context(|| format!("bind daemon at {}", cli.bind))?;
+    let poller = start_poller(
         Arc::clone(&state),
         Arc::clone(&refresh_flag),
         config,
@@ -82,8 +86,26 @@ fn main() -> Result<()> {
         cache_path,
         history_path,
         refresh_sec,
+        Arc::clone(&shutdown),
     );
-    serve(&cli.bind, state, refresh_flag, Arc::new(management))
+    let result = serve(
+        listener,
+        state,
+        refresh_flag,
+        Arc::new(management),
+        Arc::clone(&shutdown),
+    );
+    shutdown.store(true, Ordering::SeqCst);
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while !poller.is_finished() && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if poller.is_finished() {
+        let _ = poller.join();
+    } else {
+        log::warn!("provider transport did not finish within the shutdown deadline");
+    }
+    result
 }
 
 fn start_poller(
@@ -94,22 +116,34 @@ fn start_poller(
     cache_path: PathBuf,
     history_path: PathBuf,
     refresh_sec: u64,
-) {
+    shutdown: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
     thread::spawn(move || {
-        loop {
+        while !shutdown.load(Ordering::SeqCst) {
             let mut providers = discover_providers(&plugin_dirs);
             sort_providers(&mut providers, &config);
             let summaries = provider_summaries(&providers, &config);
             state.lock().expect("app state poisoned").providers = summaries;
 
             for provider in &providers {
+                if shutdown.load(Ordering::SeqCst) {
+                    break;
+                }
                 if config.is_enabled(&provider.manifest.id, provider.manifest.enabled_by_default) {
                     let source = config.source_mode(&provider.manifest.id);
-                    let snapshot = probe_provider(
-                        provider,
-                        source,
-                        config.provider_config(&provider.manifest.id),
-                    );
+                    let token = usagestat_core::process::CancellationToken::with_interrupt(Some(
+                        Arc::clone(&shutdown),
+                    ));
+                    let snapshot = usagestat_core::process::with_cancellation(token, || {
+                        probe_provider(
+                            provider,
+                            source,
+                            config.provider_config(&provider.manifest.id),
+                        )
+                    });
+                    if shutdown.load(Ordering::SeqCst) {
+                        break;
+                    }
                     let record = history_record_from_snapshot(&snapshot);
                     let mut guard = state.lock().expect("app state poisoned");
                     guard.cache.upsert(snapshot);
@@ -126,7 +160,10 @@ fn start_poller(
             refresh_flag.store(false, Ordering::Relaxed);
             let deadline = Instant::now() + Duration::from_secs(refresh_sec.max(1));
             loop {
-                thread::sleep(Duration::from_millis(500));
+                if shutdown.load(Ordering::SeqCst) {
+                    return;
+                }
+                thread::sleep(Duration::from_millis(100));
                 if refresh_flag.load(Ordering::Relaxed) {
                     break;
                 }
@@ -135,27 +172,31 @@ fn start_poller(
                 }
             }
         }
-    });
+    })
 }
 
 fn serve(
-    bind: &str,
+    listener: TcpListener,
     state: Arc<Mutex<AppState>>,
     refresh_flag: Arc<AtomicBool>,
     management: Arc<cliproxy::ManagementApi>,
+    shutdown: Arc<AtomicBool>,
 ) -> Result<()> {
-    let listener = TcpListener::bind(bind)?;
-    log::info!("listening on http://{bind}");
+    listener.set_nonblocking(true)?;
+    log::info!("listening on http://{}", listener.local_addr()?);
 
-    for stream in listener.incoming() {
+    while !shutdown.load(Ordering::SeqCst) {
         let state = Arc::clone(&state);
         let flag = Arc::clone(&refresh_flag);
         let management = Arc::clone(&management);
-        match stream {
-            Ok(stream) => {
+        match listener.accept() {
+            Ok((stream, _)) => {
                 thread::spawn(move || handle_connection(stream, state, flag, management));
             }
-            Err(e) => log::warn!("accept failed: {e}"),
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(20))
+            }
+            Err(e) => return Err(e).context("accept daemon connection"),
         }
     }
 
