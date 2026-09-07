@@ -62,3 +62,15 @@ claimed as a real Windows Known Folder redirection test.
 CLI, daemon and plugin host use the same fallible core path API. There is no
 doctor command in this committed baseline; #13 must use this API when integrating
 doctor/capability diagnostics. Actual provider data/credential paths remain #11.
+
+## Private state and helper lifecycle (#5, #6)
+
+The full gate passed on every target at
+[`5daf9bc`](https://github.com/hashimkarim/usagestat/commit/5daf9bc), in
+[run 34071262106](https://github.com/hashimkarim/usagestat/actions/runs/34071262106).
+This adds private native ACL/mode checks, locked-file and failed-write recovery,
+concurrent initialization, forced writer termination, and CLI/daemon shutdown.
+Windows verifies Ctrl+C, Ctrl+Break, and actual ConPTY closure; Unix verifies
+SIGINT/SIGTERM. See [private state](private-state.md) and
+[helper execution](helper-processes.md) for guarantees and remaining service/
+provider/session qualification boundaries.
