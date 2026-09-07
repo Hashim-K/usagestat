@@ -111,6 +111,39 @@ without guessed home-relative AppData. That CLI file location/schema remains
 unverified for current versions; `credentialsPath` selects the actual file.
 [Devin's FAQ documents its native IDE roots and migration](https://docs.devin.ai/desktop/devin-desktop-faq).
 
+OpenCode Go uses `$XDG_DATA_HOME/opencode`, defaulting to the native home's
+`.local/share/opencode`, on **all three OSes**. `settings.dataDir` selects the
+complete OpenCode data directory. `settings.databasePath` selects an absolute
+database; otherwise `OPENCODE_DB` selects an absolute database or a filename
+relative to that data directory. In-memory history is explicitly unsupported.
+The default database is `opencode.db`; preview/channel-specific databases require
+an explicit selection. `OPENCODE_CONFIG_DIR` does not move auth/history, and the
+test-only `OPENCODE_TEST_HOME` does not move upstream data. Nonempty
+`OPENCODE_AUTH_CONTENT` supplies the selected auth object without reading another
+file; malformed inline auth fails explicitly. These credentials are never saved
+in the daemon's captured environment. Startup setup retains `XDG_DATA_HOME` and
+`OPENCODE_DB`; explicit data roots must be absolute.
+The existing usage calculations and web enrichment remain unchanged; current
+database schemas and live accounts still need qualification.
+This follows OpenCode's
+[global roots](https://github.com/anomalyco/opencode/blob/53fec37d8d2b9e0d92a1b4184e8df8f8480a2d26/packages/core/src/global.ts),
+[database selection](https://github.com/anomalyco/opencode/blob/53fec37d8d2b9e0d92a1b4184e8df8f8480a2d26/packages/core/src/database/database.ts),
+[auth selection](https://github.com/anomalyco/opencode/blob/53fec37d8d2b9e0d92a1b4184e8df8f8480a2d26/packages/opencode/src/auth/index.ts),
+and [xdg-basedir](https://github.com/sindresorhus/xdg-basedir/blob/main/index.js).
+
+Zed settings use Roaming AppData `Zed/settings.json` on Windows, XDG config
+`zed/settings.json` on Linux (with `FLATPAK_XDG_CONFIG_HOME` taking precedence),
+and the native home's `.config/zed/settings.json` on macOS. This distinction
+between settings and application data follows
+[Zed's resolver](https://github.com/zed-industries/zed/blob/1870e269ad88802147f2baec3086abb67d17260a/crates/paths/src/paths.rs).
+`settings.settingsPath` selects one absolute file; `settings.userDataDir` matches
+Zed's custom data directory and selects its `config/settings.json`. Comments,
+trailing commas and a UTF-8 BOM are supported. Missing explicit settings or
+unreadable/malformed settings report an error before any credential or API
+request, preserving custom-server identity. These path fixtures do not verify
+the private OS credential representation used by a particular Zed release.
+Startup setup retains an explicit absolute `FLATPAK_XDG_CONFIG_HOME`.
+
 Perplexity's existing app-cache reader requires the legacy macOS CFNetwork
 SQLite schema and Apple app request metadata. Speculative Chromium/Linux/Windows
 cache paths have been removed. This authentication method reports `unsupported`

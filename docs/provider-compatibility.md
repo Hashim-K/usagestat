@@ -90,8 +90,8 @@ Inventory: 61 providers; 89 declared provider/source pairs.
 | [ollama](../plugins/ollama/plugin.js) | web | web | manual web credential | I | I | I |
 | [openai-api](../plugins/openai-api/plugin.js) | api | api | configured token/key | I | I | I |
 | [opencode](../plugins/opencode/plugin.js) | web | web | manual web credential | I | I | I |
-| [opencode-go](../plugins/opencode-go/plugin.js) | local | local | manual web credential, files, SQLite | P | P | P |
-| [opencode-go](../plugins/opencode-go/plugin.js) | web | local | manual web credential, files, SQLite | P | P | P |
+| [opencode-go](../plugins/opencode-go/plugin.js) | local | local | manual web credential, files, SQLite | I | I | I |
+| [opencode-go](../plugins/opencode-go/plugin.js) | web | local | manual web credential, files, SQLite | I | I | I |
 | [openrouter](../plugins/openrouter/plugin.js) | api | api | configured token/key | I | I | I |
 | [perplexity](../plugins/perplexity/plugin.js) | oauth | web | files, SQLite | U-cache | P | U-cache |
 | [perplexity](../plugins/perplexity/plugin.js) | local | web | files, SQLite | U-cache | P | U-cache |
@@ -108,8 +108,8 @@ Inventory: 61 providers; 89 declared provider/source pairs.
 | [windsurf](../plugins/windsurf/plugin.js) | oauth | local | configured token/key, files, SQLite | I | I | I |
 | [windsurf](../plugins/windsurf/plugin.js) | local | local | configured token/key, files, SQLite | I | I | I |
 | [zai](../plugins/zai/plugin.js) | api | api | configured token/key | I | I | I |
-| [zed](../plugins/zed/plugin.js) | api | api | configured token/key, files | P | P | P |
-| [zed](../plugins/zed/plugin.js) | local | api | configured token/key, files | P | P | P |
+| [zed](../plugins/zed/plugin.js) | api | api | configured token/key, files | I | I | I |
+| [zed](../plugins/zed/plugin.js) | local | api | configured token/key, files | I | I | I |
 
 ## Inspected method gaps and fixture coverage
 
@@ -167,7 +167,7 @@ The same entry is audited once when several manifest modes share it.
 | [ollama](../plugins/ollama/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
 | [openai-api](../plugins/openai-api/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
 | [opencode](../plugins/opencode/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
-| [opencode-go](../plugins/opencode-go/plugin.js) | Home-relative auth/database paths; XDG/upstream Windows directories remain to port. Local and web have separate request logic. | Shared native host primitives only; provider fixture pending |
+| [opencode-go](../plugins/opencode-go/plugin.js) | Upstream XDG roots on all OSes, explicit data/database and inline auth overrides covered by fixtures. Preview channels require databasePath/OPENCODE_DB; current database schema, API, and account versions unverified. | [provider-xdg-paths.test.cjs](../tests/provider-xdg-paths.test.cjs) |
 | [openrouter](../plugins/openrouter/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
 | [perplexity](../plugins/perplexity/plugin.js) | Entry always uses legacy macOS CFNetwork cache, including declared web/oauth modes. Linux/Windows cache method explicitly unsupported; manual web-cookie implementation is absent. | [provider-remaining-paths.test.cjs](../tests/provider-remaining-paths.test.cjs) |
 | [poe](../plugins/poe/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
@@ -179,7 +179,7 @@ The same entry is audited once when several manifest modes share it.
 | [warp](../plugins/warp/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
 | [windsurf](../plugins/windsurf/plugin.js) | Native stable/Next/Devin profile selection fixtures; carried auth schemas and current application versions unverified. | [provider-paths.test.cjs](../tests/provider-paths.test.cjs) |
 | [zai](../plugins/zai/plugin.js) | Configured credentials and HTTP request code inspected; real credentials, API responses and provider/account behavior remain unverified on each OS. | Shared native host primitives only; provider fixture pending |
-| [zed](../plugins/zed/plugin.js) | Explicit credentials are available; local settings currently use a Unix path. Native settings and OS credential mappings need verification. | Shared native host primitives only; provider fixture pending |
+| [zed](../plugins/zed/plugin.js) | Upstream native/Flatpak/custom data settings paths and JSONC fixtures. Explicit credentials available; real app versions and OS credential mappings unverified. | [provider-xdg-paths.test.cjs](../tests/provider-xdg-paths.test.cjs) |
 
 Real-credential acceptance requires dated OS, architecture, app/CLI/browser version,
 authentication method, selected account/profile and expected-versus-observed normalized

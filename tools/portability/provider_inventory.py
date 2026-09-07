@@ -33,15 +33,15 @@ NOTES = {
     'kilo': 'Configured API credentials plus home-relative CLI auth path; native upstream data roots/overrides unverified.',
     'kimi': 'Home credential-file reader/refresh carried; current CLI schema and store behavior unverified.',
     'kiro': 'Native app-support/custom-root fixtures for carried cached usage layouts; current Kiro auth/usage schema and app version unverified.',
-    'opencode-go': 'Home-relative auth/database paths; XDG/upstream Windows directories remain to port. Local and web have separate request logic.',
+    'opencode-go': 'Upstream XDG roots on all OSes, explicit data/database and inline auth overrides covered by fixtures. Preview channels require databasePath/OPENCODE_DB; current database schema, API, and account versions unverified.',
     'perplexity': 'Entry always uses legacy macOS CFNetwork cache, including declared web/oauth modes. Linux/Windows cache method explicitly unsupported; manual web-cookie implementation is absent.',
     'synthetic': 'Configured API credentials plus several CLI fallback files; account ambiguity and upstream data roots/overrides need audit.',
     't3chat': 'Manual cookies/full-cURL capture fixtures on all OS conventions. Challenge preserves credentials and gives full-cURL guidance. Real browser/device-bound sessions unverified.',
     'vertex-ai': 'Bounded gcloud helper and explicit/application credentials; actual native SDK installs and account selection unverified.',
     'windsurf': 'Native stable/Next/Devin profile selection fixtures; carried auth schemas and current application versions unverified.',
-    'zed': 'Explicit credentials are available; local settings currently use a Unix path. Native settings and OS credential mappings need verification.',
+    'zed': 'Upstream native/Flatpak/custom data settings paths and JSONC fixtures. Explicit credentials available; real app versions and OS credential mappings unverified.',
 }
-PARTIAL = {'amp','augment','codebuff','factory','droid','gemini','kilo','opencode-go','synthetic','zed'}
+PARTIAL = {'amp','augment','codebuff','factory','droid','gemini','kilo','synthetic'}
 FIXTURES = {
     'claude': ['tests/provider-account-isolation.test.cjs','tools/portability/local_usage.py'],
     'codex': ['tests/codex-auth.test.cjs','tools/portability/codex_auth.py','tools/portability/local_usage.py'],
@@ -55,6 +55,8 @@ FIXTURES = {
     'windsurf': ['tests/provider-paths.test.cjs'],
     'jetbrains-ai-assistant': ['tests/provider-paths.test.cjs'],
     't3chat': ['tests/browser-manual-auth.test.cjs'],
+    'opencode-go': ['tests/provider-xdg-paths.test.cjs'],
+    'zed': ['tests/provider-xdg-paths.test.cjs'],
 }
 
 def inventory():

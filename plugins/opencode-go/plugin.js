@@ -4,8 +4,6 @@
   const SERVER_URL = "https://opencode.ai/_server";
   const WORKSPACES_SERVER_ID =
     "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f";
-  const AUTH_PATH = "~/.local/share/opencode/auth.json";
-  const DB_PATH = "~/.local/share/opencode/opencode.db";
   const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
   const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
   const LIMITS = {
@@ -59,6 +57,39 @@
       if (value) return value;
     }
     return null;
+  }
+
+  function pathValue(ctx, name, fromEnv) {
+    const value = fromEnv ? ctx.host.env.get(name) : (ctx.provider.settings || {})[name];
+    if (value === undefined || value === null || value === "") return null;
+    if (typeof value !== "string" || value.indexOf("\u0000") >= 0) {
+      throw {code: "failed", message: "OpenCode " + name + " must be a path string."};
+    }
+    return value;
+  }
+
+  function absolute(ctx, value) {
+    return ctx.app.platform === "windows" ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/.test(value) : value[0] === "/";
+  }
+
+  function dataPath(ctx, name) {
+    // Upstream uses xdg-basedir on Windows and macOS too, not native AppData.
+    const selected = pathValue(ctx, "dataDir", false);
+    const xdg = selected ? null : pathValue(ctx, "XDG_DATA_HOME", true);
+    const root = selected || (xdg ? xdg.replace(/[\\/]+$/, "") + "/opencode" : ctx.host.fs.homeDir + "/.local/share/opencode");
+    if (!absolute(ctx, root)) throw {code: "failed", message: "OpenCode dataDir/XDG_DATA_HOME must be absolute."};
+    return root.replace(/[\\/]+$/, "") + "/" + name;
+  }
+
+  function databasePath(ctx) {
+    const selected = pathValue(ctx, "databasePath", false);
+    if (selected) {
+      if (!absolute(ctx, selected)) throw {code: "failed", message: "OpenCode databasePath must be absolute."};
+      return selected;
+    }
+    const upstream = pathValue(ctx, "OPENCODE_DB", true);
+    if (upstream === ":memory:") throw {code: "unsupported", message: "OpenCode in-memory history cannot be read by another process. Select a persisted databasePath or use web credentials."};
+    return upstream && absolute(ctx, upstream) ? upstream : dataPath(ctx, upstream || "opencode.db");
   }
 
   function cookieHeader(ctx) {
@@ -271,8 +302,9 @@
   }
 
   function queryRows(ctx, sql) {
+    const path = databasePath(ctx);
     try {
-      const raw = ctx.host.sqlite.query(DB_PATH, sql);
+      const raw = ctx.host.sqlite.query(path, sql);
       const rows = Array.isArray(raw) ? raw : ctx.util.tryParseJson(raw);
       if (!Array.isArray(rows)) {
         ctx.host.log.warn("sqlite query returned non-array result");
@@ -286,12 +318,15 @@
   }
 
   function loadAuthKey(ctx) {
-    if (!ctx.host.fs.exists(AUTH_PATH)) return null;
+    const inline = ctx.host.env.get("OPENCODE_AUTH_CONTENT");
+    const path = inline ? null : dataPath(ctx, "auth.json");
+    if (!inline && !ctx.host.fs.exists(path)) return null;
 
     try {
-      const text = ctx.host.fs.readText(AUTH_PATH);
+      const text = inline || ctx.host.fs.readText(path);
       const parsed = ctx.util.tryParseJson(text);
-      if (!parsed || typeof parsed !== "object") {
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        if (inline) throw {code: "credential-malformed", message: "OPENCODE_AUTH_CONTENT must contain an auth JSON object."};
         ctx.host.log.warn("opencode auth file is not valid json");
         return null;
       }
@@ -300,6 +335,7 @@
       const key = typeof entry.key === "string" ? entry.key.trim() : "";
       return key || null;
     } catch (e) {
+      if (e && e.code) throw e;
       ctx.host.log.warn("opencode auth read failed: " + String(e));
       return null;
     }

@@ -699,7 +699,7 @@ fn capture_provider_roots(
     saved: &mut BTreeMap<String, String>,
     read: impl Fn(&str) -> Option<String>,
 ) -> Result<()> {
-    for name in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_STATE_DB", "CURSOR_NIGHTLY_STATE_DB", "CURSOR_AGENT_HOME"] {
+    for name in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_STATE_DB", "CURSOR_NIGHTLY_STATE_DB", "CURSOR_AGENT_HOME", "FLATPAK_XDG_CONFIG_HOME"] {
         if let Some(value) = read(name) {
             if value.is_empty() {
                 saved.remove(name);
@@ -711,6 +711,13 @@ fn capture_provider_roots(
                 saved.insert(name.to_owned(), value);
             }
         }
+    }
+    // OpenCode interprets relative database names beneath its XDG data root,
+    // not the process working directory. Preserve that upstream selection.
+    if let Some(value) = read("OPENCODE_DB") {
+        anyhow::ensure!(!value.contains('\0'), "OPENCODE_DB contains an invalid path character");
+        if value.is_empty() { saved.remove("OPENCODE_DB"); }
+        else { saved.insert("OPENCODE_DB".into(), value); }
     }
     Ok(())
 }
@@ -745,6 +752,14 @@ mod tests {
         capture_provider_roots(&mut saved, |_| None).unwrap();
         assert!(capture_provider_roots(&mut saved, |name| (name == "CODEX_HOME").then(|| "relative-profile".into())).is_err());
         assert!(!saved.contains_key("CODEX_HOME"));
+        capture_provider_roots(&mut saved, |name| match name {
+            "OPENCODE_DB" => Some("channel.db".into()),
+            "FLATPAK_XDG_CONFIG_HOME" => Some(root.clone()),
+            "OPENCODE_AUTH_CONTENT" => panic!("inline provider credentials requested"),
+            _ => None,
+        }).unwrap();
+        assert_eq!(saved["OPENCODE_DB"], "channel.db");
+        assert_eq!(saved["FLATPAK_XDG_CONFIG_HOME"], root);
         fs::remove_dir_all(Path::new(&root).parent().unwrap()).unwrap();
     }
 

@@ -1,7 +1,6 @@
 (function () {
   var DEFAULT_SERVICE_URL = "https://zed.dev";
   var DEFAULT_SERVER = "https://cloud.zed.dev";
-  var SETTINGS_PATH = "~/.config/zed/settings.json";
 
   function env(ctx, name) {
     try {
@@ -35,12 +34,78 @@
     return value.trim().replace(/\/+$/, "");
   }
 
+  function pathValue(ctx, name, fromEnv) {
+    var value = fromEnv ? ctx.host.env.get(name) : (ctx.provider.settings || {})[name];
+    if (value === undefined || value === null || value === "") return null;
+    var absolute = typeof value === "string" && (ctx.app.platform === "windows"
+      ? /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/.test(value) : value[0] === "/");
+    if (!absolute || value.indexOf("\u0000") >= 0) throw {code: "failed", message: "Zed " + name + " must be an absolute path."};
+    return value;
+  }
+
+  function settingsPath(ctx) {
+    var file = pathValue(ctx, "settingsPath", false);
+    if (file) return file;
+    var custom = pathValue(ctx, "userDataDir", false);
+    if (custom) return custom.replace(/[\\/]+$/, "") + "/config/settings.json";
+    if (ctx.app.platform === "macos") return ctx.host.fs.homeDir + "/.config/zed/settings.json";
+    var flatpak = ctx.app.platform === "linux" ? pathValue(ctx, "FLATPAK_XDG_CONFIG_HOME", true) : null;
+    if (flatpak) return flatpak.replace(/\/+$/, "") + "/zed/settings.json";
+    var path = ctx.host.fs.appSupportPath((ctx.app.platform === "windows" ? "Zed" : "zed") + "/settings.json");
+    if (!path) throw {code: "failed", message: "Zed config directory unavailable. Set settingsPath or userDataDir."};
+    return path;
+  }
+
+  // Zed settings are JSON with comments and trailing commas. Keep comment-like
+  // text inside strings intact, including escaped quotes and URL slashes.
+  function parseSettings(text) {
+    var clean = "", quoted = false, escaped = false;
+    text = text.replace(/^\uFEFF/, "");
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i], next = text[i + 1];
+      if (quoted) {
+        clean += c;
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') quoted = false;
+      } else if (c === '"') { quoted = true; clean += c; }
+      else if (c === "/" && next === "/") {
+        while (i + 1 < text.length && text[i + 1] !== "\n") i++;
+        clean += " ";
+      } else if (c === "/" && next === "*") {
+        var end = text.indexOf("*/", i + 2);
+        if (end < 0) throw new Error("Unterminated settings comment");
+        i = end + 1; clean += " ";
+      } else clean += c;
+    }
+    var result = ""; quoted = false; escaped = false;
+    for (var j = 0; j < clean.length; j++) {
+      var ch = clean[j];
+      if (quoted) {
+        result += ch;
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') quoted = false;
+      } else if (ch === '"') { quoted = true; result += ch; }
+      else if (ch === "," && /^\s*[}\]]/.test(clean.slice(j + 1))) continue;
+      else result += ch;
+    }
+    var parsed = JSON.parse(result);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("Settings must be an object");
+    return parsed;
+  }
+
   function readSettings(ctx) {
-    try {
-      var settings = ctx.util.tryParseJson(ctx.host.fs.readText(SETTINGS_PATH));
-      return settings && typeof settings === "object" ? settings : {};
-    } catch (_) {
+    var path = settingsPath(ctx);
+    if (!ctx.host.fs.exists(path)) {
+      if ((ctx.provider.settings || {}).settingsPath || (ctx.provider.settings || {}).userDataDir)
+        throw {code: "credential-unavailable", message: "Selected Zed settings file is missing. Check settingsPath/userDataDir."};
       return {};
+    }
+    try {
+      return parseSettings(ctx.host.fs.readText(path));
+    } catch (_) {
+      throw {code: "credential-unavailable", message: "Cannot read valid JSONC from the selected Zed settings file."};
     }
   }
 

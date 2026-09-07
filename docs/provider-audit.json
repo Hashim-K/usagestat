@@ -1491,16 +1491,16 @@
       "id": "opencode-go",
       "manifest": "plugins/opencode-go/plugin.json",
       "entry": "plugins/opencode-go/plugin.js",
-      "entrySha256": "da15002343a1b5f6bb5c43abc6ec7b856e08591875103e5dbdc6de6686ae3014",
+      "entrySha256": "8813fa15312092d60d3f87a38e45d4ef37f2af04bff9616fcac3c22c99a6bcc0",
       "declaredModes": [
         "local",
         "web"
       ],
       "autoMode": "local",
       "osStatus": {
-        "linux": "P",
-        "macos": "P",
-        "windows": "P"
+        "linux": "I",
+        "macos": "I",
+        "windows": "I"
       },
       "liveCredentialQualification": "unverified",
       "methods": [
@@ -1511,16 +1511,16 @@
       "hostCalls": [
         "env.get",
         "fs.exists",
+        "fs.homeDir",
         "fs.readText",
         "sqlite.query"
       ],
-      "literalPathEvidence": [
-        "~/.local/share/opencode/auth.json",
-        "~/.local/share/opencode/opencode.db"
-      ],
+      "literalPathEvidence": [],
       "branchesOnSourceMode": false,
-      "fixtures": [],
-      "auditNote": "Home-relative auth/database paths; XDG/upstream Windows directories remain to port. Local and web have separate request logic."
+      "fixtures": [
+        "tests/provider-xdg-paths.test.cjs"
+      ],
+      "auditNote": "Upstream XDG roots on all OSes, explicit data/database and inline auth overrides covered by fixtures. Preview channels require databasePath/OPENCODE_DB; current database schema, API, and account versions unverified."
     },
     {
       "id": "openrouter",
@@ -1848,16 +1848,16 @@
       "id": "zed",
       "manifest": "plugins/zed/plugin.json",
       "entry": "plugins/zed/plugin.js",
-      "entrySha256": "af98f0e0cfaf7814b528dff333d6b29e67bb474650b1704168bee855a40e7a98",
+      "entrySha256": "b57fe6a941e8ec36fffd1272bec95510110b1d50740fdc5c520b55c3a96b30d4",
       "declaredModes": [
         "api",
         "local"
       ],
       "autoMode": "api",
       "osStatus": {
-        "linux": "P",
-        "macos": "P",
-        "windows": "P"
+        "linux": "I",
+        "macos": "I",
+        "windows": "I"
       },
       "liveCredentialQualification": "unverified",
       "methods": [
@@ -1866,14 +1866,17 @@
       ],
       "hostCalls": [
         "env.get",
+        "fs.appSupportPath",
+        "fs.exists",
+        "fs.homeDir",
         "fs.readText"
       ],
-      "literalPathEvidence": [
-        "~/.config/zed/settings.json"
-      ],
+      "literalPathEvidence": [],
       "branchesOnSourceMode": false,
-      "fixtures": [],
-      "auditNote": "Explicit credentials are available; local settings currently use a Unix path. Native settings and OS credential mappings need verification."
+      "fixtures": [
+        "tests/provider-xdg-paths.test.cjs"
+      ],
+      "auditNote": "Upstream native/Flatpak/custom data settings paths and JSONC fixtures. Explicit credentials available; real app versions and OS credential mappings unverified."
     }
   ]
 }
