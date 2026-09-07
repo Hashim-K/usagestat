@@ -3,12 +3,26 @@ use crate::{cliproxy, http_request::Request, response_json};
 use anyhow::{Result, bail};
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+#[cfg(test)]
+use std::sync::atomic::Ordering;
 
 #[derive(Default)]
 pub struct ControlApi {
     key: Option<String>,
     shutdown: Arc<AtomicBool>,
+}
+
+pub struct Reply {
+    pub response: String,
+    pub shutdown: Option<Arc<AtomicBool>>,
+}
+
+fn reply(status: u16, reason: &str, body: &str) -> Option<Reply> {
+    Some(Reply {
+        response: response_json(status, reason, body),
+        shutdown: None,
+    })
 }
 
 impl std::fmt::Debug for ControlApi {
@@ -34,37 +48,31 @@ impl ControlApi {
         Ok(Self { key, shutdown })
     }
 
-    pub fn route(&self, request: &Request) -> Option<String> {
+    pub fn route(&self, request: &Request) -> Option<Reply> {
         if request.path != "/v1/daemon/shutdown" {
             return None;
         }
         let Some(key) = &self.key else {
-            return Some(response_json(
-                404,
-                "Not Found",
-                r#"{"error":"daemon_control_disabled"}"#,
-            ));
+            return reply(404, "Not Found", r#"{"error":"daemon_control_disabled"}"#);
         };
         let supplied = request.header("authorization").and_then(|value| {
             let (scheme, value) = value.split_once(' ')?;
             scheme.eq_ignore_ascii_case("bearer").then_some(value)
         });
         if !supplied.is_some_and(|supplied| cliproxy::keys_equal(key, supplied)) {
-            return Some(response_json(
-                401,
-                "Unauthorized",
-                r#"{"error":"invalid_control_key"}"#,
-            ));
+            return reply(401, "Unauthorized", r#"{"error":"invalid_control_key"}"#);
         }
         if request.method != "POST" {
-            return Some(response_json(
+            return reply(
                 405,
                 "Method Not Allowed",
                 r#"{"error":"method_not_allowed"}"#,
-            ));
+            );
         }
-        self.shutdown.store(true, Ordering::SeqCst);
-        Some(response_json(200, "OK", r#"{"status":"stopping"}"#))
+        Some(Reply {
+            response: response_json(200, "OK", r#"{"status":"stopping"}"#),
+            shutdown: Some(self.shutdown.clone()),
+        })
     }
 }
 
@@ -95,6 +103,7 @@ mod tests {
             assert!(
                 api.route(&request)
                     .unwrap()
+                    .response
                     .starts_with(&format!("HTTP/1.1 {status}"))
             );
             assert!(!flag.load(Ordering::SeqCst));
@@ -108,9 +117,13 @@ mod tests {
             ControlApi::default()
                 .route(&request)
                 .unwrap()
+                .response
                 .starts_with("HTTP/1.1 404")
         );
-        assert!(api.route(&request).unwrap().starts_with("HTTP/1.1 200"));
+        let reply = api.route(&request).unwrap();
+        assert!(reply.response.starts_with("HTTP/1.1 200"));
+        assert!(!flag.load(Ordering::SeqCst));
+        reply.shutdown.unwrap().store(true, Ordering::SeqCst);
         assert!(flag.load(Ordering::SeqCst));
     }
 }

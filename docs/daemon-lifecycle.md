@@ -67,3 +67,12 @@ The native gate also runs `tools/portability/daemon_lifecycle.py` with isolated
 profiles and no login-manager connection. macOS and Windows native login service
 adapters remain #8 and #9. Login/logout, reboot, Keychain/credential prompts and
 minimum-OS qualification remain separate acceptance checks.
+
+The complete gate passed on Linux x64/ARM64, macOS Intel/Apple Silicon and Windows
+x64 MSVC at [`fb8efab`](https://github.com/hashimkarim/usagestat/commit/fb8efab), in
+[run 34072863814](https://github.com/hashimkarim/usagestat/actions/runs/34072863814).
+This includes all eight native lifecycle checks. Accepted sockets explicitly
+restore blocking mode for bounded request reads; on Windows they otherwise
+inherit the nonblocking listener mode. A delayed-header fixture covers that
+timing difference. Authenticated shutdown queues its HTTP response before
+signalling the main loop to exit.

@@ -268,6 +268,7 @@ fn handle_connection(
     }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
+    let mut shutdown_after_response = None;
     let response = match http_request::read_request(&mut stream) {
         Ok(request) => {
             let controlled = state
@@ -276,6 +277,10 @@ fn handle_connection(
                 .control
                 .route(&request);
             controlled
+                .map(|reply| {
+                    shutdown_after_response = reply.shutdown;
+                    reply.response
+                })
                 .or_else(|| management.route(&request, &state))
                 .unwrap_or_else(|| route(&request.method, &request.path, &state, &refresh_flag))
         }
@@ -283,6 +288,10 @@ fn handle_connection(
     };
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
+    let _ = stream.shutdown(std::net::Shutdown::Write);
+    if let Some(shutdown) = shutdown_after_response {
+        shutdown.store(true, Ordering::SeqCst);
+    }
 }
 
 fn route(
