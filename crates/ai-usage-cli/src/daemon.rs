@@ -184,7 +184,7 @@ pub fn run(
         bail!("daemon autostart currently requires Linux with a systemd user session");
     }
     let service = service_name();
-    let key_file = paths::config_dir()?.join("t3-management-key");
+    let key_file = paths::management_key_file()?;
     if matches!(command, DaemonCommand::Key) {
         let key = read_key(&key_file)
             .context("no usable management key; run `usagestat daemon t3 auto` first")?;

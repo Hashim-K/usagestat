@@ -12,7 +12,7 @@ pub struct PathError {
     override_name: &'static str,
 }
 
-fn app_dir_name() -> &'static str {
+pub fn app_dir_name() -> &'static str {
     profile_name(std::env::current_exe().ok().as_deref())
 }
 
@@ -98,6 +98,24 @@ pub fn data_dir() -> Result<PathBuf, PathError> {
 
 pub fn config_file() -> Result<PathBuf, PathError> {
     Ok(config_dir()?.join("config.toml"))
+}
+
+/// Secrets remain at the established config location on Unix. Windows keeps
+/// them in local AppData rather than roaming application settings.
+pub fn private_state_dir() -> Result<PathBuf, PathError> {
+    if cfg!(windows) {
+        data_dir()
+    } else {
+        config_dir()
+    }
+}
+
+pub fn management_key_file() -> Result<PathBuf, PathError> {
+    Ok(private_state_dir()?.join("t3-management-key"))
+}
+
+pub fn control_key_file() -> Result<PathBuf, PathError> {
+    Ok(private_state_dir()?.join("daemon-control-key"))
 }
 
 pub fn cache_file() -> Result<PathBuf, PathError> {

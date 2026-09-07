@@ -33,6 +33,9 @@ Existing empty or malformed keys produce an error and are never silently rotated
 Private reads reject symlinks/reparse points and tighten the file's permissions.
 Explicit private-file destinations must be regular files; use native path
 overrides to select another location instead of a symlink to a credential file.
+Unix retains the existing config-directory management key. Windows uses the
+local data directory for management/control keys, keeping them out of roaming
+settings. The shared path helpers honor explicit application-directory overrides.
 
 Fireworks exports use an unpredictable private temporary directory with scope
 cleanup on success, error, and unwinding. Linux Secret Service writes use a
@@ -44,5 +47,12 @@ part of the process/lifecycle checks.
 
 The native test suite verifies access rules, complete concurrent initialization,
 replacement, injected write failure, cleanup, Unix symlink rejection, and Windows
-sharing contention. Credential-store APIs and browser/IDE authentication remain
+sharing contention. A separate process is terminated after writing unpublished
+bytes; the previous committed file remains valid, and the next update succeeds.
+These storage and key tests passed on all five initial targets at
+[`cf388fb`](https://github.com/hashimkarim/usagestat/commit/cf388fb), in
+[run 34070898869](https://github.com/hashimkarim/usagestat/actions/runs/34070898869).
+That run's separate Windows window-close test failed after all storage and
+installed-runtime checks passed; it is tracked in #5.
+Credential-store APIs and browser/IDE authentication remain
 separate issues; private files alone do not establish provider compatibility.
