@@ -226,7 +226,29 @@ fn validate_arguments(command: &Command) -> io::Result<()> {
 /// Capture each stream up to `output_limit` bytes while draining excess bytes.
 /// The child and its ordinary descendants are terminated on cancellation,
 /// timeout, errors, and parent exit. No reader threads can outlive this call.
-pub fn run(mut command: Command, timeout: Duration, output_limit: usize) -> io::Result<Output> {
+pub fn run(command: Command, timeout: Duration, output_limit: usize) -> io::Result<Output> {
+    run_inner(command, timeout, output_limit, None)
+}
+
+/// Feed a Unix helper through a nonblocking pipe while draining both output
+/// streams. Used for Secret Service writes; secret input never enters argv or
+/// a temporary file. Native Windows credential APIs do not need this adapter.
+#[cfg(unix)]
+pub fn run_with_input(
+    command: Command,
+    timeout: Duration,
+    output_limit: usize,
+    input: &[u8],
+) -> io::Result<Output> {
+    run_inner(command, timeout, output_limit, Some(input))
+}
+
+fn run_inner(
+    mut command: Command,
+    timeout: Duration,
+    output_limit: usize,
+    input: Option<&[u8]>,
+) -> io::Result<Output> {
     validate_arguments(&command)?;
     let token = current_cancellation();
     if token.as_ref().is_some_and(CancellationToken::is_cancelled) {
@@ -236,7 +258,11 @@ pub fn run(mut command: Command, timeout: Duration, output_limit: usize) -> io::
         ));
     }
     command
-        .stdin(Stdio::null())
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut wrapped = CommandWrap::from(command);
@@ -254,6 +280,14 @@ pub fn run(mut command: Command, timeout: Duration, output_limit: usize) -> io::
     };
     let mut stdout = Pipe::new(child.child.stdout().take().expect("piped stdout"))?;
     let mut stderr = Pipe::new(child.child.stderr().take().expect("piped stderr"))?;
+    #[cfg(unix)]
+    let mut stdin = child.child.stdin().take();
+    #[cfg(unix)]
+    if let Some(pipe) = &stdin {
+        pipe.prepare()?;
+    }
+    #[cfg(unix)]
+    let mut remaining = input.unwrap_or_default();
     let start = Instant::now();
     let status = loop {
         if token.as_ref().is_some_and(CancellationToken::is_cancelled) {
@@ -270,6 +304,30 @@ pub fn run(mut command: Command, timeout: Duration, output_limit: usize) -> io::
         }
         stdout.drain(output_limit)?;
         stderr.drain(output_limit)?;
+        #[cfg(unix)]
+        if let Some(pipe) = &mut stdin {
+            use std::io::Write;
+            if !remaining.is_empty() {
+                match pipe.write(&remaining[..remaining.len().min(8192)]) {
+                    Ok(0) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::WriteZero,
+                            "helper stopped reading input",
+                        ));
+                    }
+                    Ok(count) => remaining = &remaining[count..],
+                    Err(error)
+                        if matches!(
+                            error.kind(),
+                            io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                        ) => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            if remaining.is_empty() {
+                stdin.take();
+            }
+        }
         if let Some(status) = child.child.try_wait()? {
             break status;
         }
@@ -278,6 +336,13 @@ pub fn run(mut command: Command, timeout: Duration, output_limit: usize) -> io::
     // The launcher may have exited while a descendant still owns its pipes.
     // End that tree before draining remaining buffered output.
     child.stop();
+    #[cfg(unix)]
+    if !remaining.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::BrokenPipe,
+            "helper exited before receiving its input",
+        ));
+    }
     let until = Instant::now() + CLEANUP;
     while !(stdout.eof && stderr.eof) && Instant::now() < until {
         stdout.drain(output_limit)?;

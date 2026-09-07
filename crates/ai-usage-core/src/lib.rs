@@ -5,6 +5,7 @@ pub mod model;
 pub mod normalized;
 pub mod paths;
 pub mod process;
+pub mod storage;
 pub mod usage_daily;
 
 pub use cache::UsageCache;

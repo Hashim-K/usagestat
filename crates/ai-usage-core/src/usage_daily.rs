@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::Path;
 
 use chrono::{Datelike, Duration, NaiveDate, Utc};
@@ -265,40 +263,12 @@ fn read_store(path: &Path) -> Result<StoredUsageDaily, UsageDailyError> {
 }
 
 fn write_store(path: &Path, store: &StoredUsageDaily) -> Result<(), UsageDailyError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|source| UsageDailyError::Write {
-            path: parent.display().to_string(),
-            source,
-        })?;
-    }
-    let temp_path = path.with_extension("json.tmp");
-    let json = serde_json::to_vec_pretty(store).map_err(UsageDailyError::ParsePayload)?;
-    {
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(&temp_path)
-            .map_err(|source| UsageDailyError::Write {
-                path: temp_path.display().to_string(),
-                source,
-            })?;
-        file.write_all(&json)
-            .map_err(|source| UsageDailyError::Write {
-                path: temp_path.display().to_string(),
-                source,
-            })?;
-        file.write_all(b"\n")
-            .map_err(|source| UsageDailyError::Write {
-                path: temp_path.display().to_string(),
-                source,
-            })?;
-    }
-    std::fs::rename(&temp_path, path).map_err(|source| UsageDailyError::Write {
+    let mut json = serde_json::to_vec_pretty(store).map_err(UsageDailyError::ParsePayload)?;
+    json.push(b'\n');
+    crate::storage::write_atomic(path, &json).map_err(|source| UsageDailyError::Write {
         path: path.display().to_string(),
         source,
-    })?;
-    Ok(())
+    })
 }
 
 fn upsert_row(rows: &mut Vec<UsageDailyRow>, row: UsageDailyRow) {

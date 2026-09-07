@@ -25,6 +25,16 @@ fn main() {
             std::io::stdin().read_to_end(&mut bytes).unwrap();
             assert!(bytes.is_empty());
         }
+        Some("input") => {
+            // Fill both output pipes before consuming input to expose deadlocks.
+            std::io::stdout().write_all(&[b'o'; 65536]).unwrap();
+            std::io::stderr().write_all(&[b'e'; 65536]).unwrap();
+            let mut bytes = Vec::new();
+            std::io::stdin().read_to_end(&mut bytes).unwrap();
+            assert_eq!(bytes.len(), 131072);
+            assert!(bytes.iter().all(|byte| *byte == b'i'));
+        }
+        Some("ignore-input") => std::thread::sleep(Duration::from_secs(60)),
         Some("exit") => std::process::exit(args.next().unwrap().parse().unwrap()),
         Some(mode @ ("tree" | "exit-tree")) => {
             let ready = args.next().unwrap();

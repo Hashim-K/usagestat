@@ -1,6 +1,5 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::PathBuf;
 use usagestat_core::{NormalizedMetrics, UsageSnapshot, paths};
@@ -40,17 +39,10 @@ pub fn record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
 
 pub fn append_jsonl(rec: &SnapshotRecord) -> Result<()> {
     let path = history_jsonl_path()?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).with_context(|| format!("create dir {:?}", parent))?;
-    }
-    let line = serde_json::to_string(rec).context("serialize history record")?;
-    let mut f = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&path)
-        .with_context(|| format!("open {:?}", path))?;
-    writeln!(f, "{line}").with_context(|| format!("write {:?}", path))?;
-    Ok(())
+    let mut line = serde_json::to_vec(rec).context("serialize history record")?;
+    line.push(10);
+    usagestat_core::storage::append_private(&path, &line)
+        .with_context(|| format!("append history {}", path.display()))
 }
 
 /// Read all records from a JSONL file, skipping malformed lines.

@@ -139,7 +139,8 @@ fn inject_context(
     let app_data_dir = paths::data_dir()
         .map_err(|error| rquickjs::Exception::throw_message(ctx, &error.to_string()))?;
     let plugin_data_dir = app_data_dir.join("plugins").join(&manifest.id);
-    let _ = std::fs::create_dir_all(&plugin_data_dir);
+    usagestat_core::storage::private_directory(&plugin_data_dir)
+        .map_err(|error| rquickjs::Exception::throw_message(ctx, &error.to_string()))?;
     app.set("appDataDir", app_data_dir.to_string_lossy().to_string())?;
     app.set(
         "pluginDataDir",

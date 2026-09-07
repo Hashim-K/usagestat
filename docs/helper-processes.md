@@ -56,10 +56,9 @@ abort an in-flight HTTP request. The daemon lifecycle must connect its shutdown
 signal to probe cancellation in [#7](https://github.com/Hashim-K/usagestat/issues/7).
 
 The shared runner covers ccusage, gh, firectl, read-only process discovery,
-macOS `security` operations, and Linux `secret-tool` reads/deletes. Linux
-`secret-tool store` still uses its existing stdin writer and wait; migrating
-secret input to bounded execution remains open. No secret is moved into a
-temporary input file by this change.
+macOS `security` operations, and Linux `secret-tool` operations. Secret Service
+writes use a nonblocking stdin pipe, sharing the same deadline, cancellation, and
+output-draining loop. No secret is moved into a temporary input file.
 
 ## Validation and remaining qualification
 

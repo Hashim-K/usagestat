@@ -211,3 +211,5 @@ SQLite discovery uses the OS configuration directory and accepts
 
 [Helper execution and cancellation](helper-processes.md) documents the native
 process runner, Windows shim handling, and the remaining lifecycle checks.
+[Private state](private-state.md) documents access restrictions, atomic writes,
+concurrent key creation, and temporary credential handling.

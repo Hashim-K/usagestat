@@ -27,17 +27,12 @@ impl UsageCache {
     }
 
     pub fn save(&self, path: &Path) -> Result<(), CacheError> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|source| CacheError::CreateDir {
-                path: parent.to_path_buf(),
-                source,
-            })?;
-        }
-
         let text = serde_json::to_string_pretty(self).map_err(CacheError::Serialize)?;
-        fs::write(path, format!("{text}\n")).map_err(|source| CacheError::Write {
-            path: path.to_path_buf(),
-            source,
+        crate::storage::write_atomic(path, format!("{text}\n").as_bytes()).map_err(|source| {
+            CacheError::Write {
+                path: path.to_path_buf(),
+                source,
+            }
         })
     }
 

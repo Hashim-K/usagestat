@@ -1327,18 +1327,10 @@ fn parse_u64_loose(value: &str) -> Option<u64> {
 }
 
 fn append_history_record(path: &std::path::Path, record: &SnapshotRecord) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .with_context(|| format!("create dir {}", parent.display()))?;
-    }
-    let line = serde_json::to_string(record).context("serialize history record")?;
-    let mut file = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)
-        .with_context(|| format!("open {}", path.display()))?;
-    writeln!(file, "{line}").with_context(|| format!("write {}", path.display()))?;
-    Ok(())
+    let mut line = serde_json::to_vec(record).context("serialize history record")?;
+    line.push(10);
+    usagestat_core::storage::append_private(path, &line)
+        .with_context(|| format!("append history {}", path.display()))
 }
 
 fn read_history(provider_id: Option<&str>) -> Vec<SnapshotRecord> {

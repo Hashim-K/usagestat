@@ -103,6 +103,27 @@ fn output_is_capped_while_both_pipes_are_drained_and_stdin_is_closed() {
     assert_eq!(process::decode_output(&[b'a', 0xe2, 0x82]), "a");
 }
 
+#[cfg(unix)]
+#[test]
+fn input_is_bounded_and_output_cannot_deadlock_the_writer() {
+    let input = vec![b'i'; 131072];
+    let output =
+        process::run_with_input(fixture("input"), Duration::from_secs(5), 100, &input).unwrap();
+    assert!(output.status.success());
+    assert_eq!(output.stdout.len(), 100);
+    assert_eq!(output.stderr.len(), 100);
+    let started = Instant::now();
+    let error = process::run_with_input(
+        fixture("ignore-input"),
+        Duration::from_millis(200),
+        100,
+        &input,
+    )
+    .unwrap_err();
+    assert_eq!(error.kind(), io::ErrorKind::TimedOut);
+    assert!(started.elapsed() < Duration::from_secs(2));
+}
+
 #[test]
 fn helper_resolution_works_with_only_an_explicit_background_path() {
     let directory = TestDir::new();

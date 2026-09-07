@@ -2,8 +2,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -567,7 +566,9 @@ fn ensure_managed_unit(path: &Path) -> Result<()> {
 }
 
 fn read_key(path: &Path) -> Result<String> {
-    let key = fs::read_to_string(path)?.trim().to_string();
+    let key = usagestat_core::storage::read_private(path)?
+        .trim()
+        .to_string();
     if key.is_empty() || !key.bytes().all(|b| b.is_ascii_graphic()) {
         bail!("management key must be nonempty ASCII text without whitespace");
     }
@@ -575,27 +576,15 @@ fn read_key(path: &Path) -> Result<String> {
 }
 
 fn ensure_key(path: &Path) -> Result<String> {
-    fs::create_dir_all(path.parent().context("management key parent directory")?)?;
+    if path.try_exists()? {
+        return read_key(path);
+    }
     let mut random = [0_u8; 32];
     getrandom::getrandom(&mut random)
         .map_err(|error| anyhow::anyhow!("generate management key: {error}"))?;
     let key: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    match options.open(path) {
-        Ok(mut file) => {
-            writeln!(file, "{key}")?;
-            file.sync_all()?;
-            Ok(key)
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_key(path),
-        Err(e) => Err(e.into()),
-    }
+    usagestat_core::storage::create_once(path, format!("{key}\n").as_bytes())?;
+    read_key(path)
 }
 
 // systemd unit quoting is not shell quoting. Percent specifiers and (for
@@ -668,14 +657,7 @@ fn render_unit(
 }
 
 fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    fs::create_dir_all(path.parent().context("parent directory")?)?;
-    let temporary = path.with_file_name(format!(
-        "{}.{}.tmp",
-        path.file_name().context("file name")?.to_string_lossy(),
-        std::process::id()
-    ));
-    fs::write(&temporary, contents)?;
-    fs::rename(&temporary, path)?;
+    usagestat_core::storage::write_atomic(path, contents.as_bytes())?;
     Ok(())
 }
 
@@ -735,6 +717,7 @@ fn wait_until_ready(url: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Write;
     use super::*;
 
     fn temp_dir() -> PathBuf {

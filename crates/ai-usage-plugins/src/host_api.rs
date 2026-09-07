@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -440,12 +439,7 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
             ctx.clone(),
             move |ctx_inner: Ctx<'_>, path: String, content: String| -> rquickjs::Result<()> {
                 let path = expand_path(&path);
-                if let Some(parent) = path.parent() {
-                    std::fs::create_dir_all(parent).map_err(|error| {
-                        Exception::throw_message(&ctx_inner, &error.to_string())
-                    })?;
-                }
-                std::fs::write(&path, content)
+                usagestat_core::storage::write_atomic(&path, content.as_bytes())
                     .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
             },
         )?,
@@ -1133,23 +1127,12 @@ fn fireworks_auth_ini_contents(api_key: &str) -> String {
 
 fn write_fireworks_auth_ini(auth_root: &Path, api_key: &str) -> std::io::Result<PathBuf> {
     let fireworks_dir = auth_root.join(".fireworks");
-    std::fs::create_dir_all(&fireworks_dir)?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&fireworks_dir, std::fs::Permissions::from_mode(0o700))?;
-    }
-
+    usagestat_core::storage::private_directory(&fireworks_dir)?;
     let auth_ini_path = fireworks_dir.join("auth.ini");
-    std::fs::write(&auth_ini_path, fireworks_auth_ini_contents(api_key))?;
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&auth_ini_path, std::fs::Permissions::from_mode(0o600))?;
-    }
-
+    usagestat_core::storage::write_atomic(
+        &auth_ini_path,
+        fireworks_auth_ini_contents(api_key).as_bytes(),
+    )?;
     Ok(auth_ini_path)
 }
 
@@ -1196,20 +1179,18 @@ fn run_fireworks_billing_export(
         return serde_json::json!({ "status": "no_runner" });
     };
 
-    let workspace_name = format!(
-        "usagestat-fireworks-{}-{}",
-        std::process::id(),
-        chrono::Utc::now().timestamp_millis()
-    );
-    let temp_dir = std::env::temp_dir().join(&workspace_name);
-    if let Err(error) = std::fs::create_dir_all(&temp_dir) {
-        log::warn!(
-            "[plugin:{}] failed to create Fireworks export temp dir: {}",
-            plugin_id,
-            error
-        );
-        return serde_json::json!({ "status": "runner_failed" });
-    }
+    let workspace = match usagestat_core::storage::temporary_directory() {
+        Ok(directory) => directory,
+        Err(error) => {
+            log::warn!(
+                "[plugin:{}] failed to create private export directory: {}",
+                plugin_id,
+                error
+            );
+            return serde_json::json!({ "status": "runner_failed" });
+        }
+    };
+    let temp_dir = workspace.path().to_path_buf();
 
     if let Err(error) = write_fireworks_auth_ini(&temp_dir, request.api_key.trim()) {
         cleanup_fireworks_export_dir(&temp_dir);
@@ -1221,7 +1202,7 @@ fn run_fireworks_billing_export(
         return serde_json::json!({ "status": "runner_failed" });
     }
 
-    let file_name = format!("{workspace_name}.csv");
+    let file_name = String::from("usage.csv");
     let output_path = temp_dir.join(&file_name);
     let mut command = match process::command(&program) {
         Ok(command) => command,
@@ -1281,11 +1262,10 @@ fn run_fireworks_billing_export(
         }
         Ok(output) => {
             cleanup();
-            let stderr = String::from_utf8_lossy(&output.stderr);
             log::warn!(
-                "[plugin:{}] firectl billing export failed: {}",
+                "[plugin:{}] firectl billing export failed with status {}",
                 plugin_id,
-                stderr.lines().next().unwrap_or("unknown error").trim()
+                output.status
             );
             serde_json::json!({ "status": "runner_failed" })
         }
@@ -1822,28 +1802,33 @@ fn linux_secret_tool_write(
     account: Option<&str>,
     value: &str,
 ) -> Result<(), String> {
-    let Some(secret_tool) = linux_secret_tool_path() else {
-        return Err("secret-tool not installed".to_string());
-    };
-    let mut command = process::command(secret_tool).map_err(|error| error.to_string())?;
-    command.args(["store", "--label", service, "service", service]);
-    if let Some(account) = account {
-        command.args(["username", account]);
-    }
-    command.stdin(Stdio::piped());
-    let mut child = command.spawn().map_err(|error| error.to_string())?;
-    if let Some(stdin) = child.stdin.as_mut() {
-        stdin
-            .write_all(value.as_bytes())
-            .map_err(|error| error.to_string())?;
-    }
-    let output = child
-        .wait_with_output()
+    #[cfg(unix)]
+    {
+        let Some(secret_tool) = linux_secret_tool_path() else {
+            return Err("secret-tool not installed".into());
+        };
+        let mut command = process::command(secret_tool).map_err(|error| error.to_string())?;
+        command.args(["store", "--label", service, "service", service]);
+        if let Some(account) = account {
+            command.args(["username", account]);
+        }
+        let output = process::run_with_input(
+            command,
+            Duration::from_secs(30),
+            COMMAND_OUTPUT_LIMIT_BYTES,
+            value.as_bytes(),
+        )
         .map_err(|error| error.to_string())?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(command_error(&output))
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err("secret-tool store failed".into())
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (service, account, value);
+        Err("Secret Service is unavailable on this platform".into())
     }
 }
 
