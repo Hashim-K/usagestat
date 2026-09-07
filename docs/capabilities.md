@@ -78,3 +78,8 @@ missing files/helpers, invalid settings without value disclosure, cached
 denied/locked states, occupied ports, version mismatches, synthetic plugin errors,
 and unchanged filesystem contents/timestamps across doctor runs. The daemon
 lifecycle fixture also verifies the additive endpoint alongside existing arrays.
+
+The [native gate at `713bfec`](https://github.com/hashimkarim/usagestat/actions/runs/34077905565)
+passed on September 7, 2026 on Windows x64, macOS Intel/Apple Silicon and Linux
+x64/ARM64, including the installed diagnostic checks on every target. The bar's
+consumer integration is tracked separately in #17.
