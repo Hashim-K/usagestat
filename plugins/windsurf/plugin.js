@@ -8,47 +8,27 @@
   var WEEK_MS = 7 * DAY_MS
 
   var VARIANTS = [
-    {
-      marker: "devin-windsurf",
-      ideName: "windsurf",
-      stateDb: "~/Library/Application Support/Devin/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "devin-next-windsurf",
-      ideName: "windsurf-next",
-      stateDb: "~/Library/Application Support/Devin - Next/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "windsurf",
-      ideName: "windsurf",
-      stateDb: "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "windsurf-next",
-      ideName: "windsurf-next",
-      stateDb: "~/Library/Application Support/Windsurf - Next/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "windsurf",
-      ideName: "windsurf",
-      stateDb: "~/.config/Windsurf/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "windsurf-next",
-      ideName: "windsurf-next",
-      stateDb: "~/.config/Windsurf - Next/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "devin-windsurf",
-      ideName: "windsurf",
-      stateDb: "~/.config/Devin/User/globalStorage/state.vscdb",
-    },
-    {
-      marker: "devin-next-windsurf",
-      ideName: "windsurf-next",
-      stateDb: "~/.config/Devin - Next/User/globalStorage/state.vscdb",
-    },
+    { marker: "devin-windsurf", ideName: "windsurf", appDir: "Devin" },
+    { marker: "devin-next-windsurf", ideName: "windsurf-next", appDir: "Devin - Next" },
+    { marker: "windsurf", ideName: "windsurf", appDir: "Windsurf" },
+    { marker: "windsurf-next", ideName: "windsurf-next", appDir: "Windsurf - Next" },
   ]
+
+  function resolveVariants(ctx) {
+    var settings = (ctx.provider && ctx.provider.settings) || {}
+    var selected = settings.ideVariant
+    if (selected && !VARIANTS.some(function(v) { return v.marker === selected })) {
+      throw {code: "failed", message: "Unknown settings.ideVariant. Use windsurf, windsurf-next, devin-windsurf or devin-next-windsurf."}
+    }
+    if (settings.userDataDir && !selected) {
+      throw {code: "failed", message: "Set settings.ideVariant together with settings.userDataDir."}
+    }
+    return VARIANTS.filter(function(v) { return !selected || v.marker === selected }).map(function(v) {
+      var root = settings.userDataDir || ctx.host.fs.appSupportPath(v.appDir)
+      if (!root) throw {code: "failed", message: "IDE data directory unavailable. Set settings.ideVariant and settings.userDataDir."}
+      return {marker: v.marker, ideName: v.ideName, stateDb: root.replace(/[\\/]+$/, "") + "/User/globalStorage/state.vscdb"}
+    })
+  }
 
   function readFiniteNumber(value) {
     if (typeof value === "number") return Number.isFinite(value) ? value : null
@@ -190,10 +170,15 @@
     var sawApiKey = false
     var sawAuthFailure = false
 
-    for (var i = 0; i < VARIANTS.length; i++) {
-      var variant = VARIANTS[i]
-      var apiKey = loadApiKey(ctx, variant)
-      if (!apiKey) continue
+    var candidates = resolveVariants(ctx).map(function(variant) {
+      return {variant: variant, apiKey: loadApiKey(ctx, variant)}
+    }).filter(function(candidate) { return !!candidate.apiKey })
+    if (candidates.length > 1) {
+      throw {code: "failed", message: "Multiple Windsurf/Devin installations are signed in. Select settings.ideVariant to choose one account."}
+    }
+    for (var i = 0; i < candidates.length; i++) {
+      var variant = candidates[i].variant
+      var apiKey = candidates[i].apiKey
       sawApiKey = true
 
       var data = callCloud(ctx, apiKey, variant)

@@ -17,9 +17,34 @@ endpoint; it does not fall back to another profile or a saved report.
 Cursor stable and nightly use separate native application directories and
 separate `CURSOR_STATE_DB` / `CURSOR_NIGHTLY_STATE_DB` overrides. Nightly does not
 consume the stable override. An invalid explicit database does not fall back.
-The shared IDE app-support resolver uses Windows roaming Known Folders, macOS
+The shared IDE app-support resolver uses Windows APPDATA (roaming Known Folders
+when APPDATA is unset), macOS
 Application Support or Linux XDG config. It does not search copied trees from
 another OS or the old Linux config root after XDG redirection.
+
+Kiro now resolves its existing SQLite, log and profile layouts beneath native
+app support, with `settings.userDataDir` for an explicit IDE data root.
+Windsurf/Devin resolves four separate folders: `Windsurf`, `Windsurf - Next`,
+`Devin` and `Devin - Next`. If more than one contains auth, it requires
+`settings.ideVariant` (`windsurf`, `windsurf-next`, `devin-windsurf`, or
+`devin-next-windsurf`) before issuing a request. A custom `settings.userDataDir`
+requires that variant too. An unsuccessful selected account never switches to
+another installation.
+
+JetBrains uses native app support and supports `settings.configDir`, the complete
+IDE configuration directory corresponding to upstream `idea.config.path`.
+Multiple discovered quota profiles require that selection instead of choosing
+whichever quota looks newest or most used. These changes port the existing
+provider-specific file layouts; they do not establish compatibility with new
+upstream schema versions, remote IDE profiles, portable installs or undocumented
+auth stores. The Node harness tests all three OS path conventions with synthetic
+redirected roots and reuses the native host's actual JavaScript utility code.
+
+The native root behavior follows
+[VS Code's user-data resolver](https://github.com/microsoft/vscode/blob/main/src/vs/platform/environment/node/userDataPath.ts).
+The carried Kiro and Windsurf/Devin suffixes still require real-app version
+qualification; the new OS roots are inferred from the shared application layout.
+[JetBrains documents native directories and `idea.config.path`](https://www.jetbrains.com/help/idea/directories-used-by-the-ide-to-store-settings-caches-plugins-and-logs.html).
 
 Plugin SQLite reads open the real database read-only, with a 250 ms busy timeout
 and connection-level query-only mode. They respect active WAL writers and

@@ -1,10 +1,7 @@
 (function () {
-  const STATE_DB = "~/Library/Application Support/Kiro/User/globalStorage/state.vscdb"
   const STATE_KEY = "kiro.kiroAgent"
-  const LOGS_ROOT = "~/Library/Application Support/Kiro/logs"
   const LOG_FILE_NAME = "q-client.log"
   const TOKEN_PATH = "~/.aws/sso/cache/kiro-auth-token.json"
-  const PROFILE_PATH = "~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent/profile.json"
   const REFRESH_URL = "https://prod.us-east-1.auth.desktop.kiro.dev/refreshToken"
   const LIVE_STALE_MS = 15 * 60 * 1000
   const REFRESH_BUFFER_MS = 10 * 60 * 1000
@@ -13,6 +10,15 @@
   const LOGIN_HINT = "Open Kiro and sign in, then try again."
   const SESSION_HINT = "Kiro session expired. Open Kiro and sign in again."
   const DATA_HINT = "Kiro usage data unavailable. Open the Kiro account dashboard once and try again."
+
+  function appPath(ctx, suffix) {
+    const settings = (ctx.provider && ctx.provider.settings) || {}
+    const root = typeof settings.userDataDir === "string" && settings.userDataDir
+      ? settings.userDataDir
+      : ctx.host.fs.appSupportPath("Kiro")
+    if (!root) throw { code: "failed", message: "Kiro data directory unavailable. Set settings.userDataDir to the IDE user data directory." }
+    return root.replace(/[\\/]+$/, "") + "/" + suffix
+  }
 
   function num(value) {
     if (typeof value === "number") return Number.isFinite(value) ? value : null
@@ -77,7 +83,7 @@
   function loadProfileArn(ctx, authState) {
     const fromToken = authState && authState.token && authState.token.profileArn
     if (typeof fromToken === "string" && fromToken) return fromToken
-    const parsed = readJsonFile(ctx, PROFILE_PATH, "profile")
+    const parsed = readJsonFile(ctx, appPath(ctx, "User/globalStorage/kiro.kiroagent/profile.json"), "profile")
     return parsed && typeof parsed.arn === "string" && parsed.arn.trim() ? parsed.arn.trim() : null
   }
   function regionFromArn(profileArn) {
@@ -87,7 +93,7 @@
   function readStateValue(ctx, key) {
     try {
       const sql = "SELECT value FROM ItemTable WHERE key = '" + String(key).replace(/'/g, "''") + "' LIMIT 1;"
-      const rows = ctx.util.tryParseJson(ctx.host.sqlite.query(STATE_DB, sql))
+      const rows = ctx.util.tryParseJson(ctx.host.sqlite.query(appPath(ctx, "User/globalStorage/state.vscdb"), sql))
       return Array.isArray(rows) && rows.length && typeof rows[0].value === "string" ? rows[0].value : null
     } catch (e) {
       ctx.host.log.warn("Kiro sqlite read failed: " + String(e))
@@ -185,14 +191,15 @@
     return null
   }
   function loadLoggedState(ctx) {
+    const logsRoot = appPath(ctx, "logs")
     let sessions = []
     try {
-      sessions = ctx.host.fs.listDir(LOGS_ROOT).slice().sort().reverse()
+      sessions = ctx.host.fs.listDir(logsRoot).slice().sort().reverse()
     } catch {
       return null
     }
     for (let i = 0; i < sessions.length && i < 12; i += 1) {
-      const sessionRoot = LOGS_ROOT + "/" + sessions[i]
+      const sessionRoot = logsRoot + "/" + sessions[i]
       let windows = []
       try {
         windows = ctx.host.fs.listDir(sessionRoot).slice().sort().reverse()

@@ -29,6 +29,10 @@ def check(cli: Path) -> dict:
 
             def probe(expected):
                 script = '''globalThis.__usagestat_plugin = {probe: function(ctx) {
+                    if (!ctx.host.fs.appSupportPath('usagestat-fixture/leaf')) throw 'Native app support root unavailable';
+                    ['../escape', '/absolute', 'C:/drive', 'a\\\\b', 'a//b'].forEach(function(path) {
+                        if (ctx.host.fs.appSupportPath(path) != null) throw 'Invalid app suffix accepted';
+                    });
                     var result;
                     try { result = JSON.parse(ctx.host.sqlite.query(DB, 'SELECT value FROM ItemTable'))[0].value; }
                     catch (_) { result = 'busy'; }

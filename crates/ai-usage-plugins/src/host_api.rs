@@ -453,6 +453,14 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     )?;
 
     fs_obj.set(
+        "appSupportPath",
+        Function::new(ctx.clone(), move |relative: String| -> Option<String> {
+            usagestat_core::provider_paths::app_support_path(&relative)
+                .map(|path| path.to_string_lossy().into_owned())
+        })?,
+    )?;
+
+    fs_obj.set(
         "firstExistingAppSupport",
         Function::new(ctx.clone(), move |relative: String| -> Option<String> {
             first_existing_app_support_path(&relative)
@@ -1502,16 +1510,8 @@ fn first_existing_app_support_path(relative: &str) -> Option<String> {
 }
 
 fn app_support_path_candidates(relative: &str) -> Vec<String> {
-    let rel = relative
-        .trim()
-        .trim_start_matches('/')
-        .trim_start_matches('\\');
-    if rel.is_empty() {
-        return Vec::new();
-    }
-
-    usagestat_core::provider_paths::app_support_dir()
-        .map(|root| vec![root.join(rel).to_string_lossy().into_owned()])
+    usagestat_core::provider_paths::app_support_path(relative)
+        .map(|path| vec![path.to_string_lossy().into_owned()])
         .unwrap_or_default()
 }
 

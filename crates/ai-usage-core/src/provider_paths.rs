@@ -10,10 +10,28 @@ pub enum ProviderPathError {
     InvalidCodexHome,
 }
 
-/// Electron/VS Code user data: native roaming AppData on Windows, Application
-/// Support on macOS, and XDG config on Linux. Never inspect another OS's tree.
+/// Electron/VS Code user data: APPDATA (native roaming Known Folder fallback)
+/// on Windows, Application Support on macOS, and XDG config on Linux.
 pub fn app_support_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(value) = std::env::var_os("APPDATA").filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(value);
+        return path.is_absolute().then_some(path);
+    }
     dirs::config_dir()
+}
+
+pub fn app_support_path(relative: &str) -> Option<PathBuf> {
+    // Plugins pass portable slash-separated suffixes, never another root.
+    if relative.is_empty()
+        || relative.contains(['\\', ':', '\0'])
+        || relative
+            .split('/')
+            .any(|part| matches!(part, "" | "." | ".."))
+    {
+        return None;
+    }
+    app_support_dir().map(|root| root.join(relative))
 }
 
 pub fn claude_usage_roots() -> Result<Vec<PathBuf>, ProviderPathError> {

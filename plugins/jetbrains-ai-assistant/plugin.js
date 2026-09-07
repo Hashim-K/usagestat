@@ -24,21 +24,10 @@
     "Writerside",
   ]
 
-  function platformBaseDirs(platform) {
-    if (platform === "macos") {
-      return ["~/Library/Application Support/JetBrains"]
-    }
-    if (platform === "linux") {
-      return ["~/.config/JetBrains"]
-    }
-    if (platform === "windows") {
-      return ["~/AppData/Roaming/JetBrains"]
-    }
-    return [
-      "~/Library/Application Support/JetBrains",
-      "~/.config/JetBrains",
-      "~/AppData/Roaming/JetBrains",
-    ]
+  function platformBaseDirs(ctx) {
+    var root = ctx.host.fs.appSupportPath("JetBrains")
+    if (!root) throw {code: "failed", message: "JetBrains configuration directory unavailable. Set settings.configDir to the IDE configuration directory."}
+    return [root]
   }
 
   function isLikelyIdeDirName(name) {
@@ -75,7 +64,12 @@
   }
 
   function buildQuotaPaths(ctx) {
-    var bases = platformBaseDirs(ctx.app.platform)
+    var settings = (ctx.provider && ctx.provider.settings) || {}
+    if (typeof settings.configDir === "string" && settings.configDir) {
+      var explicit = settings.configDir.replace(/[\\/]+$/, "") + "/options/" + QUOTA_FILENAME
+      return ctx.host.fs.exists(explicit) ? [explicit] : []
+    }
+    var bases = platformBaseDirs(ctx)
     var paths = []
     var seen = Object.create(null)
     for (var b = 0; b < bases.length; b += 1) {
@@ -213,47 +207,6 @@
     return null
   }
 
-  function pickBestState(ctx, states) {
-    var best = null
-    var bestMs = -Infinity
-
-    for (var i = 0; i < states.length; i += 1) {
-      var state = states[i]
-      var untilMs = null
-
-      if (state.quota.until) {
-        untilMs = ctx.util.parseDateMs(state.quota.until)
-      }
-      if (untilMs === null && state.nextRefill && state.nextRefill.next) {
-        untilMs = ctx.util.parseDateMs(state.nextRefill.next)
-      }
-      if (untilMs === null) untilMs = -Infinity
-
-      if (!best || untilMs > bestMs) {
-        best = state
-        bestMs = untilMs
-        continue
-      }
-
-      if (untilMs === bestMs) {
-        var currentRatio =
-          state.quota.maximum > 0 ? state.quota.used / state.quota.maximum : 0
-        var bestRatio =
-          best.quota.maximum > 0 ? best.quota.used / best.quota.maximum : 0
-        if (currentRatio > bestRatio) {
-          best = state
-          continue
-        }
-        if (currentRatio === bestRatio && state.quota.used > best.quota.used) {
-          best = state
-          continue
-        }
-      }
-    }
-
-    return best
-  }
-
   function formatDecimal(value, places) {
     if (!Number.isFinite(value)) return null
     var factor = Math.pow(10, places)
@@ -294,7 +247,10 @@
         : "JetBrains AI Assistant not detected. Open a JetBrains IDE with AI Assistant enabled."
     }
 
-    var chosen = pickBestState(ctx, states)
+    if (states.length > 1) {
+      throw {code: "failed", message: "Multiple JetBrains IDE quota profiles found. Select settings.configDir to choose one installation."}
+    }
+    var chosen = states[0]
     var quota = chosen.quota
     var scale = detectDisplayScale(quota, chosen.nextRefill)
     var usedPercent = (quota.used / quota.maximum) * 100
