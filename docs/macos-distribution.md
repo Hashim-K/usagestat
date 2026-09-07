@@ -47,7 +47,8 @@ adapter with an isolated service identity.
 Public installation commands will be `brew install hashimkarim/tap/usagestat`,
 `brew upgrade hashimkarim/tap/usagestat` and
 `brew uninstall hashimkarim/tap/usagestat` once the Mac formula is qualified and
-published. Before removing a managed installation, use `usagestat daemon disable`.
+published. Before removing a managed installation, use `usagestat daemon unregister`
+to stop/remove its owned LaunchAgent while retaining saved intent and keys.
 Uninstall retains configuration/history/credentials. Active-daemon upgrades,
 failed replacement recovery, and
 bar/Homebrew coexistence still need their lifecycle implementation/acceptance;

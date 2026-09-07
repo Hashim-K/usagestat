@@ -20,7 +20,8 @@ Each feature separates three questions:
 | `qualification` | Evidence scope, such as native fixtures, session tests pending, or unverified. |
 | `reasonCode` | Optional stable reason for unavailability. |
 
-The feature keys cover daemon foreground/autostart/authenticated shutdown,
+The feature keys cover daemon foreground/autostart/authenticated shutdown and
+`daemon.unregister` for managed login-registration removal,
 credential operations, automatic browser import/manual credentials, helper
 process cleanup, and structured provider states. Credential availability remains
 `not-checked`: constructing capabilities never opens an OS credential store.

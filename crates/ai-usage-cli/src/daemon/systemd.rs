@@ -301,6 +301,16 @@ impl ServiceManager for Systemd {
         systemctl(&["try-restart", self.name.as_str()])?;
         Ok(())
     }
+    fn unregister(&self) -> Result<()> {
+        self.validate()?;
+        if self.file.exists() {
+            self.disable()?;
+            ensure_managed_unit(&self.file)?;
+            fs::remove_file(&self.file).context("remove managed user service file")?;
+            systemctl(&["daemon-reload"])?;
+        }
+        Ok(())
+    }
 }
 
 fn managed_unit(unit: &str, binary: &Path, settings: &Path) -> Result<String> {

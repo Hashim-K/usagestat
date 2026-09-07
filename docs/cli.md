@@ -64,13 +64,21 @@ cargo build -p usagestat-cli -p usagestat-daemon
 ./target/debug/usagestat daemon disable
 ```
 
-`enable` starts the daemon now and registers `usagestat.service` in your systemd
-user configuration. The dashboard at `http://127.0.0.1:6736/dashboard` and native
+`enable` starts the daemon now and registers the native per-user login service:
+systemd on Linux, a LaunchAgent on macOS, or an interactive-user scheduled task on
+Windows. Native desktop session qualification remains pending. The dashboard at `http://127.0.0.1:6736/dashboard` and native
 API serve all enabled providers. Startup checks the daemon's `/health` endpoint.
 Repeating `enable` restarts with the selected settings and remembers the last
 T3 mode. `disable` stops the daemon and turns autostart off, preserving that
 mode and its key. `status` supports `--json`. Regular CLI usage does not
 enable or start the service.
+
+`daemon unregister` stops and removes only the managed login registration.
+It retains the saved owner/binary/key paths, T3 mode, config, history and credentials
+for recovery or reinstallation. It does not remove the executable package or kill
+an independently started foreground daemon. Unmanaged service files/tasks are
+rejected before removal. Repeating it is safe after successful removal. Installers
+can discover this command through the `daemon.unregister` capability.
 
 T3 compatibility is a separate opt-in:
 
@@ -89,8 +97,8 @@ address, binary, config, plugin paths, and autostart setting. A running daemon
 restarts to apply a mode change; a stopped daemon stays stopped.
 
 Plain `enable` uses the last T3 mode, including after a full `disable`.
-The preference is stored in `~/.config/usagestat/daemon.json` (respecting
-`XDG_CONFIG_HOME` and the dev profile). You can set it before first enabling
+The preference is stored in `daemon.json` in the [native config directory](platform-support.md#filesystem-and-profiles)
+(respecting overrides and the dev profile). You can set it before first enabling
 the daemon. T3 starts off by default; a retained key alone does not enable it.
 When T3 is off, startup neither creates nor reads that key. Managed services
 ignore `USAGESTAT_MANAGEMENT_KEY` in their environment so the saved mode

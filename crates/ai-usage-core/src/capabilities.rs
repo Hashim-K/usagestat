@@ -97,6 +97,10 @@ fn for_platform(
             Feature::new(native, "native-fixtures"),
         ),
         (
+            "daemon.unregister",
+            Feature::new(native, "native-fixtures-pending"),
+        ),
+        (
             "credentials.genericPassword",
             Feature::new(
                 native,

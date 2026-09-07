@@ -37,7 +37,8 @@ providers and serves the dashboard and HTTP API. The backend is a per-user
 process. Foreground execution remains available everywhere; normal autostart is
 explicitly enabled through the CLI using systemd user units on Linux, a
 LaunchAgent on macOS, and a per-user scheduled task on Windows. Installation
-alone must not enable autostart. Those native service adapters are still pending.
+alone must not enable autostart. Native adapter fixtures pass; normal desktop
+login/reboot, minimum-OS and active upgrade qualification remain pending.
 
 The default endpoint stays `127.0.0.1:6736`. The management/T3 API stays opt-in and
 requires its management key. A configured non-loopback bind must remain explicit.

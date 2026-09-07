@@ -71,7 +71,7 @@ def render(version, manifests, *, local_directory=None, formula_name='usagestat'
               '  def caveats', '    <<~EOS',
               '      Enable login startup explicitly with: usagestat daemon enable',
               '      The usagestat CLI owns startup registration; no brew services entry is installed.',
-              '      Before removing a managed installation, run: usagestat daemon disable',
+              '      Before removing a managed installation, run: usagestat daemon unregister',
               '      Configuration, history, and credentials are retained when uninstalling.',
               '    EOS', '  end', '', '  test do',
               '    assert_match version.to_s, shell_output("#{bin}/usagestat --version")',

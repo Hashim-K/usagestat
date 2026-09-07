@@ -43,6 +43,10 @@ impl ServiceManager for FakeManager {
         self.calls.borrow_mut().push("restart");
         Ok(())
     }
+    fn unregister(&self) -> Result<()> {
+        self.calls.borrow_mut().push("unregister");
+        Ok(())
+    }
 }
 
 fn installation(root: &Path) -> Installation {
@@ -149,4 +153,26 @@ fn legacy_boolean_preferences_remain_compatible_and_invalid_settings_fail() {
         fs::write(&path, text).unwrap();
         assert!(DaemonSettings::load(&path).is_err());
     }
+}
+
+#[test]
+fn unregister_retains_owner_custom_key_paths_t3_intent_and_provider_data() {
+    let directory = usagestat_core::storage::temporary_directory().unwrap();
+    let root = directory.path();
+    let stored = root.join("daemon.json");
+    let install = installation(root);
+    fs::write(&install.management_key_file, "synthetic retained key").unwrap();
+    fs::write(&install.config, "synthetic retained configuration").unwrap();
+    let settings = DaemonSettings { t3_mode: SavedT3Mode::Auto, installation: Some(install.clone()) };
+    let mut manager = FakeManager {state: Registration::default(), calls: RefCell::new(Vec::new()), reject: true};
+    assert!(unregister(&settings, &stored, &manager).is_err());
+    assert!(!stored.exists());
+    assert_eq!(*manager.calls.borrow(), ["validate"]);
+    manager.reject = false;
+    manager.calls.borrow_mut().clear();
+    unregister(&settings, &stored, &manager).unwrap();
+    assert_eq!(*manager.calls.borrow(), ["validate", "unregister"]);
+    assert_eq!(DaemonSettings::load(&stored).unwrap(), Some(settings));
+    assert_eq!(fs::read_to_string(&install.management_key_file).unwrap(), "synthetic retained key");
+    assert_eq!(fs::read_to_string(&install.config).unwrap(), "synthetic retained configuration");
 }

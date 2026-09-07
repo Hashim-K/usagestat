@@ -208,6 +208,14 @@ impl ServiceManager for LaunchAgent {
         }
         Ok(())
     }
+    fn unregister(&self) -> Result<()> {
+        self.validate()?;
+        self.disable()?;
+        if self.read()?.is_some() {
+            fs::remove_file(&self.file).context("remove managed LaunchAgent plist")?;
+        }
+        Ok(())
+    }
     fn restart(&self) -> Result<()> {
         // Reload the plist as well as the saved settings, so upgraded absolute
         // binary paths take effect. Preserve disabled/autostart intent.
@@ -638,9 +646,15 @@ mod live_tests {
         wait_for_installation(settings.installation.as_ref().unwrap()).unwrap();
         manager.disable().unwrap();
         assert!(key.exists() && manager.settings.exists());
+        manager.unregister().unwrap();
+        manager.unregister().unwrap();
+        let removed = manager.query().unwrap();
+        assert!(!removed.registered && !removed.running && !removed.enabled);
+        assert!(key.exists() && manager.settings.exists());
         let foreign = b"<?xml version=\"1.0\"?><plist version=\"1.0\"><dict><key>Label</key><string>unmanaged</string></dict></plist>";
         fs::write(&manager.file, foreign).unwrap();
         assert!(manager.validate().is_err());
+        assert!(manager.unregister().is_err());
         assert_eq!(fs::read(&manager.file).unwrap(), foreign);
         // Restore the owned file so Drop can complete its own-label cleanup.
         fs::remove_file(&manager.file).unwrap();

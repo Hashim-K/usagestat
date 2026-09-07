@@ -95,6 +95,8 @@ pub enum DaemonCommand {
         #[arg(long)]
         t3: bool,
     },
+    /// Stop and remove this profile's managed login registration; retain settings and credentials
+    Unregister,
     /// Toggle T3 while preserving whether the daemon is running
     Toggle {
         #[arg(long, required = true)]
@@ -380,10 +382,19 @@ fn execute(
             settings.save(&stored_path)?;
             manager.disable()?;
         }
+        DaemonCommand::Unregister => unregister(&settings, &stored_path, manager)?,
         DaemonCommand::Status => {}
         DaemonCommand::Key => unreachable!(),
     }
     service_status(manager, &settings)
+}
+
+fn unregister(settings: &DaemonSettings, stored_path: &Path, manager: &dyn ServiceManager) -> Result<()> {
+    manager.validate()?;
+    // Retain migrated installation/key paths as well as T3 mode. Removing login
+    // registration must not discard credentials or silently transfer ownership.
+    settings.save(stored_path)?;
+    manager.unregister()
 }
 
 fn apply_t3(

@@ -22,6 +22,9 @@ pub(super) trait ServiceManager {
     fn install(&self, installation: &Installation, settings: &Path) -> Result<()>;
     fn enable(&self) -> Result<()>;
     fn disable(&self) -> Result<()>;
+    fn unregister(&self) -> Result<()> {
+        bail!("this service adapter cannot remove login registration")
+    }
     fn restart(&self) -> Result<()>;
 }
 

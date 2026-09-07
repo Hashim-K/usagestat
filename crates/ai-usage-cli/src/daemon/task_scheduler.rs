@@ -318,6 +318,18 @@ impl ServiceManager for ScheduledTask {
         }
         Ok(())
     }
+    fn unregister(&self) -> Result<()> {
+        let session = Session::connect()?;
+        if let Some(task) = session.task(&self.name)? {
+            self.validate_task(&task)?;
+            unsafe { task.SetEnabled(VARIANT_BOOL::from(false)) }?;
+            self.stop(&task)?;
+            self.validate_task(&task)?;
+            unsafe { session.folder.DeleteTask(&BSTR::from(&self.name), 0) }
+                .context("remove managed per-user scheduled task")?;
+        }
+        Ok(())
+    }
     fn restart(&self) -> Result<()> {
         let session = Session::connect()?;
         let task = session
@@ -589,6 +601,12 @@ mod tests {
         manager.disable().unwrap();
         // Make our disposable task foreign, then prove validation and disable
         // preserve it. Cleanup owns this unique name and removes it afterwards.
+        manager.unregister().unwrap();
+        manager.unregister().unwrap();
+        let removed = manager.query().unwrap();
+        assert!(!removed.registered && !removed.enabled && !removed.running);
+        assert_eq!(read_key(&key).unwrap(), retained);
+        manager.install(settings.installation.as_ref().unwrap(), &manager.settings).unwrap();
         let session = Session::connect().unwrap();
         let task = session.task(&manager.name).unwrap().unwrap();
         unsafe {
@@ -613,6 +631,7 @@ mod tests {
         }
         assert!(manager.validate().is_err());
         assert!(manager.disable().is_err());
+        assert!(manager.unregister().is_err());
         assert!(session.task(&manager.name).unwrap().is_some());
     }
 }
