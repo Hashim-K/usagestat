@@ -34,6 +34,15 @@ installation, command shims, resources/doctor, daemon health and shutdown,
 literal arguments, exit codes, local npm exec, omitted dependencies and retained
 data after removal. All real providers are disabled before daemon startup.
 
+The [five-target npm installation rehearsal](https://github.com/hashimkarim/usagestat/actions/runs/34079566610)
+passed on September 7, 2026 using the exact staged packages from
+[`385466e`'s release run](https://github.com/hashimkarim/usagestat/actions/runs/34078930473).
+It includes native Windows `.cmd` invocation and rejection of service ownership
+from the real temporary npm exec cache. The initial Windows failure was the
+Python fixture's command-line quoting; the corrected fixture passed against the
+same package bytes. Login/reboot, real-account coexistence, running/interrupted
+version upgrades and first public-registry publication remain pending in #21/#20.
+
 The publication helper checks every staged/existing version before uploading,
 publishes and verifies platforms before the main package, and rejects conflicting
 published bytes. Retries skip only matching integrity and metadata. It sets
