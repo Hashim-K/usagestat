@@ -35,12 +35,27 @@ def check(launcher: Path) -> dict:
         }}), encoding="utf-8")
         mode = root / "fixture-mode"
         mode.write_text("exit")
-        child = subprocess.run([str(launcher), "--service-settings", str(settings)], env=env, cwd=root, timeout=10)
-        assert child.returncode == 37, child.returncode
+        child = subprocess.Popen([str(launcher), "--service-settings", str(settings)], env=env, cwd=root)
+        try:
+            deadline = time.monotonic() + 8
+            while not (root / "parent.pid").exists():
+                assert child.poll() is None, "launcher failed before its backend started"
+                assert time.monotonic() < deadline, "synthetic backend did not start"
+                time.sleep(0.02)
+            crashed_pid = int((root / "parent.pid").read_text())
+            mode.write_text("tree")
+            address = read_address(root / "descendant.ready", time.monotonic() + 8)
+            assert int((root / "parent.pid").read_text()) != crashed_pid, "launcher did not restart its failed backend"
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+        assert_stopped(address)
         logs = Path(env["USAGESTAT_DATA_DIR"]) / "logs"
         assert "synthetic daemon stdout" in (logs / "daemon.stdout.log").read_text()
         assert "synthetic daemon stderr" in (logs / "daemon.stderr.log").read_text()
-        result["checks"].append("no-console-exit-code-and-private-output")
+        result["checks"].append("no-console-backend-crash-restart-and-private-output")
+        (root / "descendant.ready").unlink()
         mode.write_text("tree")
         child = subprocess.Popen([str(launcher), "--service-settings", str(settings)], env=env, cwd=root)
         parent = None

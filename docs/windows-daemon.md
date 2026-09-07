@@ -24,15 +24,19 @@ its helper descendants. Normal disable first uses the private authenticated
 shutdown endpoint. Logs are private files under the saved local data directory.
 Dev packages use `usagestat-service-dev.exe` beside `usagestatd-dev.exe`.
 
-Tasks have no execution time limit, allow battery operation, ignore duplicate
-starts, and restart after failure at one-minute intervals (up to 999 attempts).
+The launcher restarts an unsuccessfully exited backend after five seconds; a
+successful authenticated shutdown exits normally. Tasks have no execution time
+limit, allow battery operation and ignore duplicate starts. Task Scheduler also
+has a one-minute failure retry policy (up to 999 attempts), but backend crash
+recovery does not depend on that policy: a demand-started task did not recover
+within 90 seconds in the initial native test.
 Disable stops the owned task and retains its disabled registration, settings,
 data and keys. T3 changes retain autostart intent and do not start a stopped
 daemon. Re-enable updates moved/upgraded executable paths. Native COM properties
 provide status and validate task ownership; localized command output is unused.
 An existing task with a different marker, principal, profile, or action is preserved.
 
-The native gate exercises console-free startup, private output, exit propagation,
+The native gate exercises console-free startup, private output, crash supervision,
 forced launcher tree cleanup, repeated task enable/disable, actual crash restart,
 T3 changes, moved paths and unmanaged task preservation. Fixtures own unique task
 names and synthetic profiles. A standard-user login/reboot, minimum supported

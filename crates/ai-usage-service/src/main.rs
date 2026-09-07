@@ -15,17 +15,26 @@ fn main() {
     if args.next().is_some() || !path.is_absolute() {
         std::process::exit(2);
     }
-    let code = match native::run(&path) {
-        Ok(code) => code,
-        Err(error) => {
-            if let Some(parent) = path.parent() {
-                let message = format!("Windows background launcher failed: {error}\n");
-                let _ = usagestat_core::storage::append_private(
-                    &parent.join("daemon-startup-error.log"),
-                    message.as_bytes(),
-                );
+    let code = loop {
+        match native::run(&path) {
+            Ok(0) => break 0,
+            Ok(_) => {
+                // Task Scheduler restart-on-failure is not reliable for every
+                // demand-start/logon-session combination. Keep the backend's crash
+                // recovery local to its supervisor. Every iteration closes the
+                // previous job before starting another child tree.
+                std::thread::sleep(std::time::Duration::from_secs(5));
             }
-            1
+            Err(error) => {
+                if let Some(parent) = path.parent() {
+                    let message = format!("Windows background launcher failed: {error}\n");
+                    let _ = usagestat_core::storage::append_private(
+                        &parent.join("daemon-startup-error.log"),
+                        message.as_bytes(),
+                    );
+                }
+                break 1;
+            }
         }
     };
     std::process::exit(code as i32);

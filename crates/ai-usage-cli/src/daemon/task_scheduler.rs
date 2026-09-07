@@ -503,7 +503,7 @@ mod tests {
             assert!(state.registered && state.enabled && state.running);
         }
         // Crash only this fixture's authenticated, owned backend. The launcher
-        // propagates failure and Task Scheduler must apply its restart policy.
+        // supervisor must restart it without depending on scheduler heuristics.
         let url = settings.installation.as_ref().unwrap().base_url();
         let health: serde_json::Value = local_client(Duration::from_secs(2))
             .unwrap()
@@ -518,7 +518,7 @@ mod tests {
             TerminateProcess(process, 37).unwrap();
             CloseHandle(process).unwrap();
         }
-        let deadline = Instant::now() + Duration::from_secs(90);
+        let deadline = Instant::now() + Duration::from_secs(15);
         loop {
             let current = local_client(Duration::from_secs(1))
                 .unwrap()
@@ -534,7 +534,7 @@ mod tests {
             }
             assert!(
                 Instant::now() < deadline,
-                "Task Scheduler did not restart the crashed owned backend"
+                "the scheduled supervisor did not restart the crashed owned backend"
             );
             std::thread::sleep(Duration::from_millis(250));
         }
