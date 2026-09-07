@@ -14,6 +14,8 @@ use usagestat_core::{AppConfig, paths};
 
 #[cfg(test)]
 mod lifecycle_tests;
+#[cfg(any(target_os = "macos", test))]
+mod launchd;
 mod service;
 #[cfg(any(target_os = "linux", test))]
 mod systemd;

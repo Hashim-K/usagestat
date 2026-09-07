@@ -76,6 +76,10 @@ def main() -> int:
                 suffix = ".exe" if os.name == "nt" else ""
                 report["probe_cancellation"] = check_probe_cancellation(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 report["daemon_lifecycle"] = check_daemon_lifecycle(target_dir / args.target / "debug")
+                if platform.system() == "Darwin":
+                    env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
+                    command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",
+                            "--target", args.target, "isolated_native_launchagent_lifecycle", "--", "--ignored", "--nocapture"])
             else:
                 report["smoke"] = {"status": "blocked", "reason": "native build failed; see build.log"}
         except Exception as error:

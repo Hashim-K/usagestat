@@ -25,6 +25,7 @@ env_logger.workspace = true
 getrandom.workspace = true
 log.workspace = true
 pbkdf2.workspace = true
+plist = "=1.8.0"
 reqwest.workspace = true
 rustls.workspace = true
 rusqlite.workspace = true

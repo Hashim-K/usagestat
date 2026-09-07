@@ -30,15 +30,19 @@ pub(super) fn native() -> Result<Box<dyn ServiceManager>> {
     {
         Ok(Box::new(super::systemd::Systemd::new()?))
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(super::launchd::LaunchAgent::new()?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         Ok(Box::new(Unavailable))
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 struct Unavailable;
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
 impl ServiceManager for Unavailable {
     fn kind(&self) -> &'static str {
         "none"
