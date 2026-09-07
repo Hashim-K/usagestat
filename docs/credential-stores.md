@@ -55,5 +55,9 @@ retention, failed updates and the JavaScript host methods. Tests use synthetic
 payloads; native provider login, locked/denied stores and refresh behavior still
 need consenting test-account qualification.
 
+The native record and JavaScript integration tests pass on Windows Server 2025
+x64 in [run 34075747116](https://github.com/hashimkarim/usagestat/actions/runs/34075747116)
+(2026-09-07); regression tests also pass on both Linux and macOS architectures.
+
 Microsoft documents [credential lookup in the current logon session](https://learn.microsoft.com/en-us/windows/win32/api/wincred/nf-wincred-credreadw)
 and [application-defined target/blob semantics](https://learn.microsoft.com/en-us/windows/win32/api/wincred/ns-wincred-credentialw).

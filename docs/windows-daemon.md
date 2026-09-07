@@ -1,7 +1,10 @@
 # Windows per-user daemon
 
 Implementation and qualification: [#9](https://github.com/hashimkarim/usagestat/issues/9).
-Native service qualification is pending; this describes feature-branch code.
+The isolated scheduled-task, crash-supervision and process-tree tests pass on
+Windows Server 2025 x64 ([run 34075747116](https://github.com/hashimkarim/usagestat/actions/runs/34075747116),
+2026-09-07). Standard-user session qualification below remains pending; this
+describes feature-branch code.
 
 `usagestat daemon enable` registers a current-user Task Scheduler task named
 `usagestat-<SID>` (`usagestat-dev-<SID>` for dev builds). Its logon trigger and
