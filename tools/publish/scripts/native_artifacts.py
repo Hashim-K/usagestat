@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path, PurePosixPath
 import platform
+import posixpath
 import re
 import shutil
 import struct
@@ -139,10 +140,12 @@ def runtime_resource_names(root: Path, tracked: list[str]) -> list[str]:
             continue
         manifest = json.loads((root / name).read_text(encoding="utf-8"))
         entry = manifest.get("entry")
-        if not isinstance(entry, str) or not entry or "\\" in entry or ":" in entry or any(part in ("", ".", "..") for part in entry.split("/")):
+        if not isinstance(entry, str) or not entry or entry.startswith('/') or "\\" in entry or ":" in entry:
             raise ValueError(f"Unsafe provider entry resource: {name}")
-        script = str(path.parent / entry)
-        if script not in names or script.endswith((".test.js", ".spec.js")):
+        # Alias providers intentionally share a sibling provider's entry file.
+        # Normalize that reference while keeping it within tracked plugins/.
+        script = posixpath.normpath(str(path.parent / entry))
+        if not script.startswith('plugins/') or script not in names or script.endswith((".test.js", ".spec.js")):
             raise ValueError(f"Missing runtime provider entry resource: {name}")
         selected.update([name, script])
         selected.update(item for item in names if PurePosixPath(item).parent == path.parent

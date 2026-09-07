@@ -28,6 +28,17 @@ class NativeArtifactTests(unittest.TestCase):
                 'plugins/fixture/plugin.js', 'plugins/fixture/plugin.json'])
             (provider / 'plugin.json').write_text(json.dumps({'entry': '../outside.js'}))
             with self.assertRaises(ValueError): artifacts.runtime_resource_names(root, tracked)
+            (provider / 'plugin.json').write_text(json.dumps({'entry': '../shared/plugin.js'}))
+            selected = artifacts.runtime_resource_names(root, tracked + ['plugins/shared/plugin.js'])
+            self.assertIn('plugins/shared/plugin.js', selected)
+            self.assertNotIn('plugins/fixture/plugin.js', selected)
+
+    def test_every_bundled_manifest_has_a_tracked_runtime_entry(self):
+        import subprocess
+        tracked = subprocess.check_output(['git', 'ls-files', '-z', '--', 'plugins', 'LICENSE'], cwd=ROOT).decode().split('\0')
+        selected = artifacts.runtime_resource_names(ROOT, list(filter(None, tracked)))
+        self.assertEqual(sum(name.endswith('/plugin.json') for name in selected), len(list((ROOT / 'plugins').glob('*/plugin.json'))))
+        self.assertFalse(any(name.endswith('.test.js') for name in selected))
 
     def fixture(self, files, executable, windows):
         data = artifacts.archive_bytes(files, executable, windows)
