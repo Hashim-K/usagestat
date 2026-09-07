@@ -1510,26 +1510,9 @@ fn app_support_path_candidates(relative: &str) -> Vec<String> {
         return Vec::new();
     }
 
-    let mut paths = Vec::new();
-    let mut push_join = |base: Option<String>| {
-        if let Some(base) = base.and_then(|value| non_empty_trimmed(&value)) {
-            paths.push(format!("{}/{}", base.trim_end_matches(['/', '\\']), rel));
-        }
-    };
-
-    push_join(std::env::var("APPDATA").ok());
-    push_join(std::env::var("LOCALAPPDATA").ok());
-    push_join(std::env::var("XDG_CONFIG_HOME").ok());
-
-    if let Some(home) = home_dir() {
-        let home = home.to_string_lossy();
-        paths.push(format!("{home}/.config/{rel}"));
-        paths.push(format!("{home}/Library/Application Support/{rel}"));
-        paths.push(format!("{home}/AppData/Roaming/{rel}"));
-        paths.push(format!("{home}/AppData/Local/{rel}"));
-    }
-
-    paths
+    usagestat_core::provider_paths::app_support_dir()
+        .map(|root| vec![root.join(rel).to_string_lossy().into_owned()])
+        .unwrap_or_default()
 }
 
 fn non_empty_trimmed(value: &str) -> Option<String> {
@@ -1916,22 +1899,12 @@ fn redact_value(value: &str) -> String {
 }
 
 fn sqlite_query_impl(path: &str, sql: &str) -> Result<String, String> {
-    let conn = match Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY) {
-        Ok(c) => c,
-        Err(e) => {
-            let encoded = path
-                .replace('%', "%25")
-                .replace(' ', "%20")
-                .replace('#', "%23")
-                .replace('?', "%3F");
-            let uri = format!("file:{}?immutable=1", encoded);
-            Connection::open_with_flags(
-                &uri,
-                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_URI,
-            )
-            .map_err(|e2| format!("sqlite open failed: {e} (fallback: {e2})"))?
-        }
-    };
+    // IDE databases may have an active WAL writer. Immutable mode ignores
+    // locking/change detection and is unsafe for that case; fail explicitly.
+    let conn = Connection::open_with_flags(path, OpenFlags::SQLITE_OPEN_READ_ONLY)
+        .map_err(|error| format!("sqlite open failed: {error}"))?;
+    conn.busy_timeout(Duration::from_millis(250)).map_err(|error| error.to_string())?;
+    conn.pragma_update(None, "query_only", true).map_err(|error| error.to_string())?;
     let mut stmt = conn.prepare(sql).map_err(|e| e.to_string())?;
     let col_names: Vec<String> = stmt.column_names().into_iter().map(String::from).collect();
     let rows = stmt

@@ -28,16 +28,9 @@ impl CursorInstall {
 }
 
 fn platform_roots() -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = dirs::config_dir().into_iter().collect();
-    // Existing Linux installs may predate a redirected XDG_CONFIG_HOME.
-    #[cfg(target_os = "linux")]
-    if let Some(home) = usagestat_core::paths::home_dir() {
-        let legacy = home.join(".config");
-        if !roots.contains(&legacy) {
-            roots.push(legacy);
-        }
-    }
-    roots
+    usagestat_core::provider_paths::app_support_dir()
+        .into_iter()
+        .collect()
 }
 
 fn resolve_from_roots(install: CursorInstall, roots: &[PathBuf]) -> Option<PathBuf> {
@@ -49,21 +42,28 @@ fn resolve_from_roots(install: CursorInstall, roots: &[PathBuf]) -> Option<PathB
 
 /// `state.vscdb` for one install only (stable **or** nightly - never merged).
 pub fn resolve_cursor_state_db_for(install: CursorInstall) -> Option<PathBuf> {
-    let custom = if install == CursorInstall::Nightly {
-        std::env::var("CURSOR_NIGHTLY_STATE_DB")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .or_else(|| std::env::var("CURSOR_STATE_DB").ok())
-    } else {
-        std::env::var("CURSOR_STATE_DB").ok()
+    let key = match install {
+        CursorInstall::Stable => "CURSOR_STATE_DB",
+        CursorInstall::Nightly => "CURSOR_NIGHTLY_STATE_DB",
     };
-    if let Some(custom) = custom.filter(|value| !value.trim().is_empty()) {
-        let path = usagestat_core::paths::expand_home(custom.trim());
-        if path.is_file() {
-            return Some(path);
-        }
+    resolve_profile(
+        install,
+        &platform_roots(),
+        std::env::var(key).ok().as_deref(),
+    )
+}
+
+fn resolve_profile(
+    install: CursorInstall,
+    roots: &[PathBuf],
+    custom: Option<&str>,
+) -> Option<PathBuf> {
+    if let Some(custom) = custom.filter(|value| !value.is_empty()) {
+        let path = usagestat_core::paths::expand_home(custom);
+        // An invalid explicit profile must not select a different installation.
+        return path.is_file().then_some(path);
     }
-    resolve_from_roots(install, &platform_roots())
+    resolve_from_roots(install, roots)
 }
 
 pub fn resolve_cursor_state_db_for_plugin_id(plugin_id: &str) -> Option<PathBuf> {
@@ -95,6 +95,28 @@ mod tests {
             );
         }
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn missing_explicit_database_never_falls_back_to_an_installed_account() {
+        let fixture = tempfile::tempdir().unwrap();
+        let database = fixture.path().join("Cursor").join(STATE_DB_SUFFIX);
+        std::fs::create_dir_all(database.parent().unwrap()).unwrap();
+        std::fs::write(&database, []).unwrap();
+        let roots = [fixture.path().to_owned()];
+        assert_eq!(
+            resolve_profile(CursorInstall::Stable, &roots, None),
+            Some(database)
+        );
+        assert_eq!(
+            resolve_profile(
+                CursorInstall::Stable,
+                &roots,
+                Some(fixture.path().join("missing").to_str().unwrap())
+            ),
+            None
+        );
+        assert_eq!(resolve_profile(CursorInstall::Nightly, &roots, None), None);
     }
 
     #[test]

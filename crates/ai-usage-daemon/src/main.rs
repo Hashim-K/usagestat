@@ -468,6 +468,9 @@ fn serve_cost(provider_id: &str) -> String {
             .unwrap_or_else(|_| "{}".into());
             response_json(200, "OK", &body)
         }
+        Err(error) if error.is::<usagestat_core::provider_paths::ProviderPathError>() => {
+            provider_path_error_response()
+        }
         Err(_) => serve_saved_cost(provider_id),
     }
 }
@@ -506,10 +509,21 @@ fn serve_local_usage_report(rest: &str) -> String {
     match local_usage_report(provider, report) {
         Ok(body) => response_json(200, "OK", &body),
         Err(e) => {
+            if e.is::<usagestat_core::provider_paths::ProviderPathError>() {
+                return provider_path_error_response();
+            }
             log::warn!("local usage report failed: {e}");
             serve_saved_usage_report(provider_id, report)
         }
     }
+}
+
+fn provider_path_error_response() -> String {
+    response_json(
+        200,
+        "OK",
+        r#"{"error":{"code":"LOCAL_USAGE_PATH_UNAVAILABLE","message":"Provider profile directory unavailable; check CLAUDE_CONFIG_DIR or CODEX_HOME"}}"#,
+    )
 }
 
 fn serve_saved_usage_report(provider_id: &str, report: &str) -> String {
@@ -701,18 +715,8 @@ fn scan_local_usage(provider: &str) -> Result<Vec<LocalUsageEvent>> {
     }
 }
 
-fn home_dir() -> Option<PathBuf> {
-    paths::home_dir()
-}
-
 fn scan_claude_usage() -> Result<Vec<LocalUsageEvent>> {
-    let Some(home) = home_dir() else {
-        return Ok(Vec::new());
-    };
-    let roots = [
-        home.join(".claude/projects"),
-        home.join("Library/Developer/Xcode/CodingAssistant/ClaudeAgentConfig/projects"),
-    ];
+    let roots = usagestat_core::provider_paths::claude_usage_roots()?;
     let mut events = Vec::new();
     for root in roots {
         for file in jsonl_files(&root) {
@@ -792,13 +796,7 @@ fn scan_claude_file(path: &Path, events: &mut Vec<LocalUsageEvent>) -> Result<()
 }
 
 fn scan_codex_usage() -> Result<Vec<LocalUsageEvent>> {
-    let Some(home) = home_dir() else {
-        return Ok(Vec::new());
-    };
-    let roots = [
-        home.join(".codex/sessions"),
-        home.join(".codex/archived_sessions"),
-    ];
+    let roots = usagestat_core::provider_paths::codex_usage_roots()?;
     let mut events = Vec::new();
     for root in roots {
         for file in jsonl_files(&root) {
