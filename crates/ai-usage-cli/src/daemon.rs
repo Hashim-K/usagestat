@@ -297,12 +297,14 @@ fn execute(
             )?;
             let app = AppConfig::load_optional(&config)?;
             let plugin_dirs = if extra_dirs.is_empty() && settings.installation.is_some() {
-                settings.installation.as_ref().unwrap().plugin_dirs.clone()
+                let previous = settings.installation.as_ref().unwrap();
+                paths::relocate_installed_plugin_dirs(&previous.plugin_dirs, &previous.binary, &binary, paths::app_dir_name())
             } else {
-                paths::plugin_dirs(&app, extra_dirs)?
+                let selected = paths::plugin_dirs(&app, extra_dirs)?
                     .iter()
                     .map(|dir| absolute(dir))
-                    .collect::<Result<Vec<_>>>()?
+                    .collect::<Result<Vec<_>>>()?;
+                paths::relocate_installed_plugin_dirs(&selected, &std::env::current_exe()?, &binary, paths::app_dir_name())
             };
             let mut environment = settings
                 .installation

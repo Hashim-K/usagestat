@@ -173,6 +173,35 @@ fn installed_plugin_dirs(exe: &Path, profile: &str) -> Vec<PathBuf> {
     dirs
 }
 
+/// Replace only known bundled-resource locations when an installation moves.
+/// External/custom plugin roots retain their order. This works after an old keg
+/// was removed, so matching must not depend on the old paths still existing.
+pub fn relocate_installed_plugin_dirs(
+    saved: &[PathBuf],
+    old_executable: &Path,
+    new_executable: &Path,
+    profile: &str,
+) -> Vec<PathBuf> {
+    if old_executable == new_executable {
+        return saved.to_vec();
+    }
+    let previous = installed_plugin_dirs(old_executable, profile);
+    let replacement = installed_plugin_dirs(new_executable, profile);
+    let mut result = Vec::new();
+    let mut replaced = false;
+    for path in saved {
+        if previous.contains(path) {
+            if !replaced {
+                result.extend(replacement.iter().cloned());
+                replaced = true;
+            }
+        } else {
+            result.push(path.clone());
+        }
+    }
+    dedupe_dirs(result)
+}
+
 pub fn plugin_dirs(config: &AppConfig, extra_dirs: &[PathBuf]) -> Result<Vec<PathBuf>, PathError> {
     let mut dirs = Vec::new();
     dirs.extend(extra_dirs.iter().cloned());
@@ -200,6 +229,31 @@ fn dedupe_dirs(dirs: Vec<PathBuf>) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn upgrades_relocate_bundled_paths_after_old_keg_removal_preserving_custom_order() {
+        let old = Path::new("Cellar/usagestat/1.0.3/bin/usagestatd");
+        let new = Path::new("Cellar/usagestat/1.0.4/bin/usagestatd");
+        let custom = PathBuf::from("explicit 使用 plugins");
+        let mut saved = vec![custom.clone()];
+        saved.extend(installed_plugin_dirs(old, "usagestat"));
+        saved.push(PathBuf::from("outside/other-package/plugins"));
+        let result = relocate_installed_plugin_dirs(&saved, old, new, "usagestat");
+        let mut expected = vec![custom.clone()];
+        expected.extend(installed_plugin_dirs(new, "usagestat"));
+        expected.push(PathBuf::from("outside/other-package/plugins"));
+        assert_eq!(result, expected);
+        assert_eq!(relocate_installed_plugin_dirs(&saved, old, old, "usagestat"), saved);
+        assert_eq!(relocate_installed_plugin_dirs(&[custom.clone()], old, new, "usagestat"), vec![custom]);
+        // Explicit owner transfer can change the resource layout too.
+        let flat = Path::new("new archive 使用/usagestatd.exe");
+        let result = relocate_installed_plugin_dirs(&saved, old, flat, "usagestat");
+        assert_eq!(result[1], PathBuf::from("new archive 使用/plugins"));
+        assert_eq!(result.len(), 3);
+        let app = Path::new("Usage.app/Contents/MacOS/usagestatd");
+        let result = relocate_installed_plugin_dirs(&saved, old, app, "usagestat");
+        assert_eq!(result[1], PathBuf::from("Usage.app/Contents/Resources/plugins"));
+    }
 
     #[test]
     fn home_expansion_preserves_native_paths_and_missing_homes() {

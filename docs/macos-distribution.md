@@ -53,6 +53,12 @@ automatic migration of saved keg paths, failed replacement recovery, and
 bar/Homebrew coexistence still need their lifecycle implementation/acceptance;
 the revision fixture does not establish those behaviors.
 
+Re-enabling a relocated installation now replaces recognized old bundled plugin
+paths with locations derived from the selected new daemon executable. Custom
+plugin paths keep their precedence; matching still works after the old keg was
+removed. Explicit owner transfers apply the new archive/app resource layout.
+This relocation fix does not itself orchestrate an active package-manager upgrade.
+
 Direct desktop signing belongs to the actual macOS bar bundle, whose frontend
 is tracked in [bar #15](https://github.com/hashimkarim/usagestat-bar/issues/15).
 Its handoff must include both backend executables and matching resources, sign
