@@ -246,6 +246,27 @@ fn native_candidates(name: &str) -> Result<Vec<Candidate>, &'static str> {
     }
     let uid = unsafe { libc::geteuid() };
     let deadline = Instant::now() + Duration::from_secs(5);
+    // KERN_PROCARGS2 rejects a supplied buffer larger than KERN_ARGMAX,
+    // even if the process itself has only a few arguments.
+    let mut limits = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    let mut argmax: libc::c_int = 0;
+    let mut limit_size = std::mem::size_of_val(&argmax);
+    let queried = unsafe {
+        libc::sysctl(
+            limits.as_mut_ptr(),
+            2,
+            (&mut argmax as *mut libc::c_int).cast(),
+            &mut limit_size,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    if queried != 0
+        || limit_size != std::mem::size_of_val(&argmax)
+        || !(1..=4 * 1024 * 1024).contains(&argmax)
+    {
+        return Err("ide-process-query-unavailable");
+    }
     let mut candidates = Vec::new();
     for line in String::from_utf8_lossy(&output.stdout).lines() {
         if Instant::now() >= deadline
@@ -267,7 +288,7 @@ fn native_candidates(name: &str) -> Result<Vec<Candidate>, &'static str> {
             continue;
         }
         let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
-        let mut buffer = vec![0u8; 4 * 1024 * 1024];
+        let mut buffer = vec![0u8; argmax as usize];
         let mut length = buffer.len();
         let result = unsafe {
             libc::sysctl(
