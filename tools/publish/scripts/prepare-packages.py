@@ -4,6 +4,7 @@ import argparse
 import hashlib
 import re
 import shutil
+import sys
 import tarfile
 from pathlib import Path
 
@@ -67,12 +68,23 @@ def prepare(tag, assets, output, root):
     aur = replace_one(r'^pkgrel=.*$', 'pkgrel=1', aur)
     aur = replace_one(r'^sha256sums_x86_64=.*$', f'sha256sums_x86_64=("{hashes["x86_64"]}")', aur)
     (output / 'PKGBUILD').write_text(aur)
-    brew = (root / 'packaging/homebrew/Formula/usagestat.rb').read_text()
-    brew = replace_one(r'^  version ".*"$', f'  version "{version}"', brew)
-    values = iter([hashes['aarch64'], hashes['x86_64']])
-    brew, count = re.subn(r'sha256 "[a-f0-9]+"', lambda _: f'sha256 "{next(values)}"', brew)
-    if count != 2:
-        raise ValueError('Expected two Homebrew checksums')
+    if (assets / 'usagestat-artifacts.json').exists():
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from homebrew_formula import generate
+        brew = generate(assets)
+        if f'  version "{version}"' not in brew:
+            raise ValueError('Homebrew release version differs from requested tag')
+    else:
+        # Published releases predating the native manifest contract remain usable.
+        # Never infer Mac availability from an unqualified loose archive.
+        if list(assets.glob('usagestat-macos-*')):
+            raise ValueError('macOS Homebrew inputs require verified native manifests')
+        brew = (root / 'packaging/homebrew/Formula/usagestat.rb').read_text()
+        brew = replace_one(r'^  version ".*"$', f'  version "{version}"', brew)
+        values = iter([hashes['aarch64'], hashes['x86_64']])
+        brew, count = re.subn(r'sha256 "[a-f0-9]+"', lambda _: f'sha256 "{next(values)}"', brew)
+        if count != 2:
+            raise ValueError('Expected two Homebrew checksums')
     (output / 'usagestat.rb').write_text(brew)
     rpm = (root / 'packaging/rpm/usagestat.spec').read_text()
     rpm = replace_one(r'^Version:.*$', f'Version:        {version}', rpm)

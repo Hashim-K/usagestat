@@ -158,10 +158,37 @@ jobs:
           path: dist
           if-no-files-found: error
 
+  homebrew-test:
+    name: Rehearse Homebrew on ${{ matrix.runner }}
+    needs: aggregate
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: usagestat-complete-release-inputs
+          path: dist
+      - name: Install, upgrade and remove a disposable native formula
+        run: python tools/publish/scripts/homebrew_rehearsal.py --artifacts dist --report target/homebrew-result.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: homebrew-rehearsal-${{ matrix.runner }}
+          path: target/homebrew-result.json
+          if-no-files-found: warn
+
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: [aggregate, npm-test]
+    needs: [aggregate, npm-test, homebrew-test]
     if: github.event_name == 'push' && github.ref_type == 'tag'
     permissions:
       contents: write

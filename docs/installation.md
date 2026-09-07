@@ -5,6 +5,10 @@ Use the [published support table](../README.md#install) to choose a channel for
 your system. The package channels below currently serve **v1.0.3**. For work
 from a source checkout, see [development](../README.md#development).
 
+The native macOS Homebrew adapter and installation rehearsal are tracked in
+[macOS distribution](macos-distribution.md). macOS public availability and signing
+remain pending; the commands for published Linux packages below retain their scope.
+
 ## Arch Linux / AUR
 
 [`usagestat-bin`](https://aur.archlinux.org/packages/usagestat-bin) installs the

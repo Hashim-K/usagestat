@@ -121,6 +121,15 @@ jobs:
         run: |
           gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir assets \
             --pattern '*.tar.gz' --pattern '*.tar.gz.sha256'
+          python3 - <<'PY'
+          import json, os, subprocess
+          repo, tag = os.environ['GITHUB_REPOSITORY'], os.environ['RELEASE_TAG']
+          release = json.loads(subprocess.check_output(['gh', 'release', 'view', tag, '--repo', repo, '--json', 'assets']))
+          names = {asset['name'] for asset in release['assets']}
+          if 'usagestat-artifacts.json' in names:
+              subprocess.run(['gh', 'release', 'download', tag, '--repo', repo, '--dir', 'assets',
+                              '--pattern', 'usagestat-artifacts.json*', '--pattern', '*.manifest.json*'], check=True)
+          PY
           python3 tools/publish/scripts/prepare-packages.py "$RELEASE_TAG" assets prepared
       - name: Install Homebrew recipe tools
         if: matrix.platform == 'homebrew'
