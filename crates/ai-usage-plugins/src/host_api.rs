@@ -248,6 +248,18 @@ pub fn inject<'js>(
     inject_env(ctx, &host)?;
     inject_fs(ctx, &host)?;
     inject_codex(ctx, &host)?;
+    let crypto = Object::new(ctx.clone())?;
+    crypto.set("sha256Hex", Function::new(ctx.clone(), |value: String| sha256_hex(value.as_bytes()))?)?;
+    host.set("crypto", crypto)?;
+    let cursor_paths = Object::new(ctx.clone())?;
+    let cursor_plugin = plugin_id.to_owned();
+    cursor_paths.set("resolveStateDb", Function::new(ctx.clone(), move || {
+        crate::cursor_paths::resolve_cursor_state_db_for_plugin_id(&cursor_plugin)
+            .map(|path| path.to_string_lossy().into_owned())
+    })?)?;
+    cursor_paths.set("sharedCredentialsAllowed", plugin_id == "cursor"
+        && std::env::var_os("CURSOR_STATE_DB").is_none_or(|value| value.is_empty()))?;
+    host.set("cursorPaths", cursor_paths)?;
     inject_keychain(ctx, &host, plugin_id)?;
     inject_ls(ctx, &host)?;
     inject_http(ctx, &host)?;
@@ -1543,16 +1555,8 @@ fn current_keychain_account() -> Result<String, String> {
     }
     #[cfg(not(windows))]
     {
-        Ok(std::env::var("USER")
-            .ok()
-            .and_then(|value| non_empty_trimmed(&value))
-            .or_else(|| {
-                std::env::var("USERNAME")
-                    .ok()
-                    .and_then(|value| non_empty_trimmed(&value))
-            })
-            .or_else(|| read_command_stdout("id", &["-un"]))
-            .unwrap_or_else(|| "usagestat-user".to_string()))
+        read_command_stdout("id", &["-un"])
+            .ok_or_else(|| "credential-unavailable: native user identity unavailable".into())
     }
 }
 

@@ -335,6 +335,7 @@ fn execute(
                         .to_owned(),
                 );
             }
+            capture_provider_roots(&mut environment, |name| std::env::var(name).ok())?;
             if *t3 {
                 settings.t3_mode = SavedT3Mode::Auto;
             }
@@ -694,6 +695,26 @@ fn quota_endpoint_available(url: &str, key_file: &Path) -> bool {
     check().unwrap_or(false)
 }
 
+fn capture_provider_roots(
+    saved: &mut BTreeMap<String, String>,
+    read: impl Fn(&str) -> Option<String>,
+) -> Result<()> {
+    for name in ["CLAUDE_CONFIG_DIR", "CODEX_HOME", "CURSOR_STATE_DB", "CURSOR_NIGHTLY_STATE_DB", "CURSOR_AGENT_HOME"] {
+        if let Some(value) = read(name) {
+            if value.is_empty() {
+                saved.remove(name);
+            } else {
+                // Relative roots change meaning at login. Expanding them also
+                // changes Claude's raw-path credential hash, so require the
+                // user/upstream application to agree on an absolute spelling.
+                anyhow::ensure!(Path::new(&value).is_absolute(), "{name} must be an absolute provider path before enabling startup at login");
+                saved.insert(name.to_owned(), value);
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::systemd::*;
@@ -708,6 +729,23 @@ mod tests {
         ));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn login_environment_preserves_only_explicit_absolute_provider_roots() {
+        let root = temp_dir().join("profile 使用 with spaces").to_string_lossy().into_owned();
+        let mut saved = BTreeMap::from([("CODEX_HOME".into(), root.clone())]);
+        capture_provider_roots(&mut saved, |name| match name {
+            "CLAUDE_CONFIG_DIR" => Some(root.clone()),
+            "CODEX_HOME" => Some(String::new()),
+            "API_KEY" => panic!("secret environment requested"),
+            _ => None,
+        }).unwrap();
+        assert_eq!(saved, BTreeMap::from([("CLAUDE_CONFIG_DIR".into(), root.clone())]));
+        capture_provider_roots(&mut saved, |_| None).unwrap();
+        assert!(capture_provider_roots(&mut saved, |name| (name == "CODEX_HOME").then(|| "relative-profile".into())).is_err());
+        assert!(!saved.contains_key("CODEX_HOME"));
+        fs::remove_dir_all(Path::new(&root).parent().unwrap()).unwrap();
     }
 
     #[test]

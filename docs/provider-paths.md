@@ -46,6 +46,27 @@ The carried Kiro and Windsurf/Devin suffixes still require real-app version
 qualification; the new OS roots are inferred from the shared application layout.
 [JetBrains documents native directories and `idea.config.path`](https://www.jetbrains.com/help/idea/directories-used-by-the-ide-to-store-settings-caches-plugins-and-logs.html).
 
+Cursor plugin authentication also uses the native database resolver. A missing
+explicit database cannot fall through to another app's paths. Database auth is
+authoritative when present; generic CLI keychain tokens cannot replace it based
+on a different account's plan. Shared CLI credentials/transcript activity are
+excluded for Nightly and explicitly selected database profiles.
+
+Claude uses its profile credential file on Linux/Windows and the current user's
+Keychain account on macOS, with the same profile's file as the documented
+fallback. An explicit `CLAUDE_CONFIG_DIR` selects only its NFC-hashed service;
+the host now supplies the SHA-256 helper that this lookup requires. It does not
+fall through to the default profile or broaden the account lookup. If no valid
+file fallback exists, denied/locked store errors remain distinct from missing
+auth. This follows [Claude's credential storage documentation](https://code.claude.com/docs/en/authentication).
+
+Enabling startup at login saves explicit `CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+`CURSOR_STATE_DB`, `CURSOR_NIGHTLY_STATE_DB` and `CURSOR_AGENT_HOME` roots in the
+private service settings. Roots must be absolute so login cannot change their
+meaning or a raw-path credential hash. Unset variables retain existing service
+settings; an explicitly empty value clears that override. No provider API tokens
+are captured in this environment list.
+
 Plugin SQLite reads open the real database read-only, with a 250 ms busy timeout
 and connection-level query-only mode. They respect active WAL writers and
 committed snapshots. The old immutable fallback is removed because its

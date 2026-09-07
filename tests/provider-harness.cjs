@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 
 const root = path.resolve(__dirname, '..');
 // Run the same JS utility functions injected by the native host, rather than
@@ -27,6 +28,7 @@ function providerHarness(id, options = {}) {
     return files.has(normalized) || databases.has(normalized) || [...files.keys(), ...databases.keys()].some(key => key.startsWith(normalized + paths.sep));
   }
   const host = {
+    crypto: {sha256Hex: value => crypto.createHash('sha256').update(value, 'utf8').digest('hex')},
     env: {get: name => env[name] || null},
     fs: {
       homeDir: home,

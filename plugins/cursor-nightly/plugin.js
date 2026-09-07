@@ -102,8 +102,6 @@ globalThis.__OPENUSAGE_PLUGIN_REGISTRATION_ID__ = "cursor-nightly";
 
   const CURSOR_STATE_DB_REL = "Cursor/User/globalStorage/state.vscdb"
   const CURSOR_NIGHTLY_STATE_DB_REL = "Cursor Nightly/User/globalStorage/state.vscdb"
-  const CURSOR_STATE_DB_FALLBACK =
-    "~/Library/Application Support/Cursor/User/globalStorage/state.vscdb"
 
   function cursorBaseProviderId(ctx) {
     if (ctx.account && ctx.account.baseProviderId) {
@@ -113,34 +111,24 @@ globalThis.__OPENUSAGE_PLUGIN_REGISTRATION_ID__ = "cursor-nightly";
   }
 
   function getCursorDbPath(ctx) {
-    try {
-      if (
-        ctx.host.cursorPaths &&
-        typeof ctx.host.cursorPaths.resolveStateDb === "function"
-      ) {
-        var resolved = ctx.host.cursorPaths.resolveStateDb()
-        if (resolved) return resolved
-      }
-    } catch (e) {
-      ctx.host.log.warn("cursorPaths.resolveStateDb failed: " + String(e))
+    if (ctx.host.cursorPaths && typeof ctx.host.cursorPaths.resolveStateDb === "function") {
+      // The native resolver owns explicit profile selection, including missing
+      // overrides. Do not undo it by searching another installation.
+      return ctx.host.cursorPaths.resolveStateDb() || null
     }
-    if (
-      ctx.host.fs &&
-      typeof ctx.host.fs.firstExistingAppSupport === "function"
-    ) {
-      var rel =
-        cursorBaseProviderId(ctx) === "cursor-nightly"
-          ? CURSOR_NIGHTLY_STATE_DB_REL
-          : CURSOR_STATE_DB_REL
-      var found = ctx.host.fs.firstExistingAppSupport(rel)
-      if (found) return found
-    }
-    return CURSOR_STATE_DB_FALLBACK
+    var rel = cursorBaseProviderId(ctx) === "cursor-nightly" ? CURSOR_NIGHTLY_STATE_DB_REL : CURSOR_STATE_DB_REL
+    return ctx.host.fs.firstExistingAppSupport(rel) || null
+  }
+
+  function sharedCredentialsAllowed(ctx) {
+    if (cursorBaseProviderId(ctx) === "cursor-nightly") return false
+    return !ctx.host.cursorPaths || ctx.host.cursorPaths.sharedCredentialsAllowed !== false
   }
 
   function readStateValue(ctx, key) {
     try {
       const dbPath = getCursorDbPath(ctx)
+      if (!dbPath) return null
       const sql =
         "SELECT value FROM ItemTable WHERE key = '" + key + "' LIMIT 1;"
       const json = ctx.host.sqlite.query(dbPath, sql)
@@ -211,35 +199,13 @@ globalThis.__OPENUSAGE_PLUGIN_REGISTRATION_ID__ = "cursor-nightly";
 
     const sqliteAccessToken = readStateValue(ctx, "cursorAuth/accessToken")
     const sqliteRefreshToken = readStateValue(ctx, "cursorAuth/refreshToken")
-    const sqliteMembershipTypeRaw = readStateValue(ctx, "cursorAuth/stripeMembershipType")
-    const sqliteMembershipType = typeof sqliteMembershipTypeRaw === "string"
-      ? sqliteMembershipTypeRaw.trim().toLowerCase()
-      : null
-
-    const keychainAccessToken = readKeychainValue(ctx, KEYCHAIN_ACCESS_TOKEN_SERVICE)
-    const keychainRefreshToken = readKeychainValue(ctx, KEYCHAIN_REFRESH_TOKEN_SERVICE)
-
-    const sqliteSubject = getTokenSubject(ctx, sqliteAccessToken)
-    const keychainSubject = getTokenSubject(ctx, keychainAccessToken)
-    const hasDifferentSubjects = !!sqliteSubject && !!keychainSubject && sqliteSubject !== keychainSubject
-    const sqliteLooksFree = sqliteMembershipType === "free"
-
     if (sqliteAccessToken || sqliteRefreshToken) {
-      if ((keychainAccessToken || keychainRefreshToken) && sqliteLooksFree && hasDifferentSubjects) {
-        ctx.host.log.info("sqlite auth looks free and differs from keychain account; preferring keychain token")
-        return {
-          accessToken: keychainAccessToken,
-          refreshToken: keychainRefreshToken,
-          source: "keychain",
-        }
-      }
-
-      return {
-        accessToken: sqliteAccessToken,
-        refreshToken: sqliteRefreshToken,
-        source: "sqlite",
-      }
+      return { accessToken: sqliteAccessToken, refreshToken: sqliteRefreshToken, source: "sqlite" }
     }
+    // Generic CLI keychain targets are shared, not tied to an IDE variant.
+    // They cannot represent Nightly or an explicitly selected database profile.
+    const keychainAccessToken = sharedCredentialsAllowed(ctx) ? readKeychainValue(ctx, KEYCHAIN_ACCESS_TOKEN_SERVICE) : null
+    const keychainRefreshToken = sharedCredentialsAllowed(ctx) ? readKeychainValue(ctx, KEYCHAIN_REFRESH_TOKEN_SERVICE) : null
 
     if (keychainAccessToken || keychainRefreshToken) {
       return {
@@ -1000,6 +966,7 @@ globalThis.__OPENUSAGE_PLUGIN_REGISTRATION_ID__ = "cursor-nightly";
   }
 
   function queryCursorTranscriptDaily(ctx) {
+    if (!sharedCredentialsAllowed(ctx)) return null
     if (!ctx.host.cursorLogs || typeof ctx.host.cursorLogs.queryDaily !== "function") return null
     try {
       var resp = ctx.host.cursorLogs.queryDaily({ since: cursorSince31DaysAgo() })

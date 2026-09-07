@@ -146,7 +146,7 @@
     try {
       const value = ctx.host.env.get(name)
       if (value === null || value === undefined) return null
-      const text = String(value).trim()
+      const text = name === "CLAUDE_CONFIG_DIR" ? String(value) : String(value).trim()
       return text || null
     } catch {
       return null
@@ -306,40 +306,27 @@
 
   function getClaudeKeychainServiceCandidates(ctx) {
     const base = buildClaudeBaseKeychainService(ctx)
-    const candidates = []
+    if (!readEnvText(ctx, "CLAUDE_CONFIG_DIR")) return [base]
     const hash = computeKeychainHashSuffix(ctx)
-    if (hash) candidates.push(base + "-" + hash)  // hashed (CLAUDE_CONFIG_DIR set)
-    candidates.push(base)                          // legacy / default
-    return candidates
+    if (!hash) throw {code: "failed", message: "The host cannot resolve this Claude profile's credential service."}
+    return [base + "-" + hash]
   }
 
   function readKeychainCredentialText(ctx, service) {
     const keychain = ctx.host.keychain
     if (!keychain) return null
-
-    if (typeof keychain.readGenericPasswordForCurrentUser === "function") {
-      try {
-        const value = keychain.readGenericPasswordForCurrentUser(service)
-        if (value) {
-          return { value, source: "keychain-current-user" }
-        }
-      } catch (e) {
-        ctx.host.log.info("current-user keychain read failed, trying legacy lookup: " + String(e))
-      }
-    }
-
-    if (typeof keychain.readGenericPassword !== "function") return null
-
+    const currentUser = typeof keychain.readGenericPasswordForCurrentUser === "function"
+    const read = currentUser ? keychain.readGenericPasswordForCurrentUser : keychain.readGenericPassword
+    if (typeof read !== "function") return null
     try {
-      const value = keychain.readGenericPassword(service)
-      if (value) {
-        return { value, source: "keychain-legacy" }
-      }
+      const value = read.call(keychain, service)
+      return value ? {value, source: currentUser ? "keychain-current-user" : "keychain-legacy"} : null
     } catch (e) {
-      ctx.host.log.info("keychain read failed (may not exist): " + String(e))
+      // Missing auth can fall back to this profile's file. Denied/locked stores
+      // must remain distinguishable, and never broaden the account lookup.
+      if (/credential-(denied|unavailable|account-mismatch|malformed):/.test(String(e))) throw e
+      return null
     }
-
-    return null
   }
 
   function loadFileCredentials(ctx) {
@@ -365,7 +352,9 @@
   }
 
   function loadKeychainCredentials(ctx) {
-    // Iterate hashed-then-legacy service names.
+    // Upstream uses Keychain on macOS and profile files on Linux/Windows.
+    if (ctx.app.platform !== "macos") return null
+    // An explicit profile reads only its own hashed service.
     for (const service of getClaudeKeychainServiceCandidates(ctx)) {
       const keychainResult = readKeychainCredentialText(ctx, service)
       if (keychainResult && keychainResult.value) {
@@ -388,11 +377,15 @@
   function loadStoredCredentials(ctx, suppressMissingWarn) {
     // Recent Claude Code versions keep the current session in Keychain and can
     // leave a stale credentials file behind, so Keychain wins when valid.
-    const keychainCredentials = loadKeychainCredentials(ctx)
+    let keychainError = null
+    let keychainCredentials = null
+    try { keychainCredentials = loadKeychainCredentials(ctx) } catch (e) { keychainError = e }
     if (keychainCredentials) return keychainCredentials
 
     const fileCredentials = loadFileCredentials(ctx)
     if (fileCredentials) return fileCredentials
+
+    if (keychainError) throw keychainError
 
     if (!suppressMissingWarn) {
       ctx.host.log.warn("no credentials found")

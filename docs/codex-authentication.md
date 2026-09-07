@@ -3,6 +3,10 @@
 Implementation for #10/#11, based on the upstream storage sources checked on
 2026-09-07. Credentialed app/version qualification is still pending.
 
+[Native run 34082197273](https://github.com/hashimkarim/usagestat/actions/runs/34082197273)
+passed at `d503564` on Linux x64/ARM64, macOS Intel/Apple Silicon and Windows x64,
+including the native Windows credential mappings and encrypted auth fixture.
+
 The provider now delegates auth selection to the native host. It resolves one
 `CODEX_HOME` (default native home + `.codex`) and reads that profile's
 `config.toml`. `cli_auth_credentials_store` selects `file`, `keyring`, `auto` or
