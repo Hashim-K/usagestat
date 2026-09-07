@@ -2,6 +2,13 @@
 
 Implementation: #12. Real-app/version qualification remains pending.
 
+[Native run 34080212757](https://github.com/hashimkarim/usagestat/actions/runs/34080212757)
+at `68b5e20` passed the process-discovery fixtures on Linux x64/ARM64,
+macOS Intel/Apple Silicon, and Windows x64. The macOS reader queries
+`KERN_ARGMAX` before allocating its `KERN_PROCARGS2` buffer; a larger buffer
+is rejected by the kernel. This evidence covers synthetic processes and local
+authenticated requests, with no access to real IDE credentials.
+
 The host's existing `ls.discover(options)` still returns the discovered endpoint
 or null. `ls.discoverStatus(options)` adds `status`, `reasonCode`, and `result`.
 Possible statuses are `ready`, `missing`, `ambiguous`, `unavailable`, `unsupported`,

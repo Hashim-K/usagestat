@@ -129,7 +129,7 @@ fn for_platform(
         ),
         (
             "ide.languageServerDiscovery",
-            Feature::new(native, "native-fixtures-pending"),
+            Feature::new(native, "native-fixtures"),
         ),
         (
             "helpers.processTreeCleanup",
