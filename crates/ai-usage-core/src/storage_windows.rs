@@ -1,7 +1,9 @@
 use std::fs::File;
 use std::io;
 use std::os::windows::io::AsRawHandle;
-use windows::Win32::Foundation::{CloseHandle, HANDLE, HLOCAL, LocalFree};
+use windows::Win32::Foundation::{
+    CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, HLOCAL, LocalFree,
+};
 use windows::Win32::Security::{self, Authorization::*, *};
 use windows::Win32::Storage::FileSystem::*;
 use windows::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
@@ -42,6 +44,56 @@ fn sid_string(sid: PSID) -> io::Result<String> {
 
 pub(super) fn current_sid() -> io::Result<String> {
     token_sid(TokenUser)
+}
+
+pub(super) fn account_sid(account: &str) -> io::Result<String> {
+    if account.is_empty() || account.contains('\0') {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "account name must be nonempty and NUL-free",
+        ));
+    }
+    let name: Vec<u16> = account.encode_utf16().chain([0]).collect();
+    let mut sid_size = 0;
+    let mut domain_size = 0;
+    let mut kind = SID_NAME_USE::default();
+    let result = unsafe {
+        LookupAccountNameW(
+            PCWSTR::null(),
+            PCWSTR(name.as_ptr()),
+            None,
+            &mut sid_size,
+            None,
+            &mut domain_size,
+            &mut kind,
+        )
+    };
+    if let Err(error) = result {
+        if error.code() != windows::core::HRESULT::from_win32(ERROR_INSUFFICIENT_BUFFER.0) {
+            return Err(win_error(error));
+        }
+    }
+    if sid_size == 0 || sid_size > 65536 || domain_size > 32768 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid native account lookup size",
+        ));
+    }
+    let mut sid = vec![0usize; (sid_size as usize).div_ceil(size_of::<usize>())];
+    let mut domain = vec![0u16; domain_size as usize];
+    unsafe {
+        LookupAccountNameW(
+            PCWSTR::null(),
+            PCWSTR(name.as_ptr()),
+            Some(PSID(sid.as_mut_ptr().cast())),
+            &mut sid_size,
+            Some(PWSTR(domain.as_mut_ptr())),
+            &mut domain_size,
+            &mut kind,
+        )
+    }
+    .map_err(win_error)?;
+    sid_string(PSID(sid.as_mut_ptr().cast()))
 }
 
 fn token_sid(class: TOKEN_INFORMATION_CLASS) -> io::Result<String> {

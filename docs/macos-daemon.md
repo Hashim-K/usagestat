@@ -1,8 +1,10 @@
 # macOS per-user daemon
 
 Implementation and qualification: [#8](https://github.com/hashimkarim/usagestat/issues/8).
-Native qualification is pending; this document describes the implementation on
-the feature branch, not a published macOS package.
+The isolated native lifecycle suite passes on macOS 15 Apple Silicon and Intel
+([run 34075010608](https://github.com/hashimkarim/usagestat/actions/runs/34075010608),
+2026-09-07). Session qualification below remains pending. This describes the
+feature branch, not a published macOS package.
 
 The macOS adapter installs a user LaunchAgent at
 `~/Library/LaunchAgents/com.usagestat.daemon.plist`. Dev builds use

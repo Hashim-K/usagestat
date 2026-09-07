@@ -107,14 +107,27 @@ impl ScheduledTask {
             let actions = definition.Actions()?;
             let mut count = 0;
             actions.Count(&mut count)?;
-            let owned = description.to_string() == MARKER
-                && Path::new(&source.to_string()) == self.settings
-                && user.to_string() == self.sid
-                && logon == TASK_LOGON_INTERACTIVE_TOKEN
-                && level == TASK_RUNLEVEL_LUA
-                && count == 1;
-            if !owned {
-                bail!("refusing to modify unmanaged scheduled task {}", self.name);
+            // Task Scheduler can normalize a supplied SID to DOMAIN\user.
+            // Resolve that identity back to a SID instead of comparing labels.
+            let user = user.to_string();
+            for (field, matches) in [
+                ("marker", description.to_string() == MARKER),
+                ("profile", Path::new(&source.to_string()) == self.settings),
+                (
+                    "principal",
+                    user == self.sid
+                        || storage::account_sid(&user).is_ok_and(|sid| sid == self.sid),
+                ),
+                ("logon type", logon == TASK_LOGON_INTERACTIVE_TOKEN),
+                ("run level", level == TASK_RUNLEVEL_LUA),
+                ("action count", count == 1),
+            ] {
+                if !matches {
+                    bail!(
+                        "refusing to modify unmanaged scheduled task {}: {field} differs",
+                        self.name
+                    );
+                }
             }
             let action: IExecAction = actions
                 .get_Item(1)?

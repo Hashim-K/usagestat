@@ -262,6 +262,11 @@ pub fn current_user_sid() -> io::Result<String> {
     platform::current_sid()
 }
 
+#[cfg(windows)]
+pub fn account_sid(account: &str) -> io::Result<String> {
+    platform::account_sid(account)
+}
+
 pub fn temporary_directory() -> io::Result<tempfile::TempDir> {
     let directory = tempfile::Builder::new()
         .prefix("usagestat-private-")
