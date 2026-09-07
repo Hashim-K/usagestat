@@ -28,6 +28,11 @@ fn win_error(error: windows::core::Error) -> io::Error {
     io::Error::from_raw_os_error(error.code().0 & 0xffff)
 }
 
+fn context(operation: &str, error: windows::core::Error) -> io::Error {
+    let error = win_error(error);
+    io::Error::new(error.kind(), format!("{operation}: {error}"))
+}
+
 fn sid_string(sid: PSID) -> io::Result<String> {
     let mut value = PWSTR::null();
     unsafe { ConvertSidToStringSidW(sid, &mut value) }.map_err(win_error)?;
@@ -89,7 +94,7 @@ pub(super) fn protect(file: &File, directory: bool) -> io::Result<()> {
                 flags,
             )
         }
-        .map_err(win_error)?,
+        .map_err(|error| context("reopen private object for ACL update", error))?,
     );
     let mut owner = PSID::default();
     let mut owner_descriptor = PSECURITY_DESCRIPTOR::default();
@@ -106,7 +111,7 @@ pub(super) fn protect(file: &File, directory: bool) -> io::Result<()> {
         )
     }
     .ok()
-    .map_err(win_error)?;
+    .map_err(|error| context("read private object owner", error))?;
     let _owner_memory = LocalMemory(owner_descriptor.0);
     let owner_sid = sid_string(owner)?;
     if owner_sid != sid && owner_sid != token_sid(TokenOwner)? {
@@ -153,7 +158,7 @@ pub(super) fn protect(file: &File, directory: bool) -> io::Result<()> {
         )
     }
     .ok()
-    .map_err(win_error)
+    .map_err(|error| context("apply private object ACL", error))
 }
 
 #[cfg(test)]

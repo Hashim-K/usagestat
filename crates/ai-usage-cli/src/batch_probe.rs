@@ -17,19 +17,9 @@ pub fn probe_timeout_secs() -> u64 {
         .unwrap_or(120)
 }
 
-/// Register SIGINT (and SIGTERM on Unix) to set the returned flag.
+/// Register native console or Unix shutdown notifications.
 pub fn register_interrupt_flag() -> Result<Arc<AtomicBool>> {
-    use signal_hook::consts::signal::SIGINT;
-    use signal_hook::flag as signal_flag;
-
-    let flag = Arc::new(AtomicBool::new(false));
-    signal_flag::register(SIGINT, Arc::clone(&flag)).context("register SIGINT")?;
-    #[cfg(unix)]
-    {
-        use signal_hook::consts::signal::SIGTERM;
-        signal_flag::register(SIGTERM, Arc::clone(&flag)).context("register SIGTERM")?;
-    }
-    Ok(flag)
+    usagestat_core::signals::register().context("register shutdown notifications")
 }
 
 /// Run a probe with a wall-clock timeout. Checks the interrupt flag every 200ms.

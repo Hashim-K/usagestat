@@ -25,6 +25,7 @@ import urllib.error
 import urllib.request
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def isolated_env(root: Path) -> dict[str, str]:
@@ -68,6 +69,53 @@ def check_snapshot(snapshots: list[dict], nonce: str) -> None:
     assert metrics["Platform"]["value"] == expected_os, snapshot
 
 
+def packaged_discovery(cli: Path, install: Path, cwd: Path, env: dict[str, str]) -> None:
+    """Inspect every real manifest without probing it, then restore the sole fixture."""
+    bundled = sorted((ROOT / "plugins").glob("*/plugin.json"))
+    copied = []
+    try:
+        for manifest in bundled:
+            destination = install / "plugins" / manifest.parent.name
+            copied.append(destination)
+            shutil.copytree(manifest.parent, destination)
+        expected = {json.loads(path.read_text(encoding="utf-8"))["id"] for path in bundled} | {"native-smoke"}
+
+        def verify(binary: Path) -> None:
+            providers = json.loads(run(binary, ["--json", "list"], cwd, env))
+            assert {provider["id"] for provider in providers} == expected
+            for provider in providers:
+                icon = (provider.get("icon") or {}).get("path")
+                if icon:
+                    assert Path(icon).is_absolute() and Path(icon).is_file(), provider["id"]
+
+        verify(cli)
+        suffix = ".exe" if os.name == "nt" else ""
+        for name, binary_dir, resource_dir, profile in [
+            ("homebrew", "bin", "share/usagestat/plugins", "usagestat"),
+            ("lib", "bin", "lib/usagestat/plugins", "usagestat"),
+            ("npm", "bin", "plugins", "usagestat"),
+            ("app", "Usage.app/Contents/MacOS", "Usage.app/Contents/Resources/plugins", "usagestat"),
+            ("dev", "bin", "share/usagestat-dev/plugins", "usagestat-dev"),
+        ]:
+            root = install.parent / (name + " installation 使用")
+            binary = root / binary_dir / (profile + suffix)
+            resources = root / resource_dir
+            binary.parent.mkdir(parents=True)
+            resources.parent.mkdir(parents=True, exist_ok=True)
+            cli.rename(binary)
+            (install / "plugins").rename(resources)
+            try:
+                verify(binary)
+            finally:
+                binary.rename(cli)
+                resources.rename(install / "plugins")
+    finally:
+        # The daemon must only see the synthetic fixture; never probe real providers.
+        for directory in copied:
+            if directory.exists():
+                shutil.rmtree(directory)
+
+
 def smoke(bin_dir: Path, https_url: str | None = None, temp_dir: Path | None = None) -> dict:
     suffix = ".exe" if os.name == "nt" else ""
     binaries = [bin_dir / (name + suffix) for name in ["usagestat", "usagestatd"]]
@@ -79,6 +127,8 @@ def smoke(bin_dir: Path, https_url: str | None = None, temp_dir: Path | None = N
     with tempfile.TemporaryDirectory(prefix="usagestat native 使用 ", dir=temp_dir) as directory:
         root = Path(directory).resolve()
         env = isolated_env(root)
+        if os.name == "nt":
+            env.pop("HOME", None)
         unrelated = root / "unrelated working directory"
         unrelated.mkdir()
         install = root / "installed 使用"
@@ -111,6 +161,7 @@ def smoke(bin_dir: Path, https_url: str | None = None, temp_dir: Path | None = N
         server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
+        install_modes = {}
         try:
             settings = {"dataDir": env["USAGESTAT_DATA_DIR"], "database": str(database),
                         "url": f"http://127.0.0.1:{server.server_port}/", "nonce": nonce}
@@ -134,11 +185,17 @@ def smoke(bin_dir: Path, https_url: str | None = None, temp_dir: Path | None = N
             # Compare file identity instead of textual path prefixes.
             assert icon.is_absolute() and icon.samefile(install / "plugins/native-smoke/icon.svg"), icon
             result["checks"].extend(["cli-version", "daemon-help", "config-validation", "installed-plugin-discovery"])
+            packaged_discovery(cli, install, unrelated, env)
+            result["checks"].extend(["all-bundled-manifests", "prefix-npm-app-layouts", "dev-resource-profile"])
+            for path in [install, *install.rglob("*")]:
+                install_modes[path] = path.stat().st_mode
+                path.chmod(0o555 if path.is_dir() or path in [cli, daemon] else 0o444)
             check_snapshot(json.loads(run(cli, ["--json", "usage", "--provider", "native-smoke",
                                                 "--source", "local"], unrelated, env)), nonce)
             marker = Path(env["USAGESTAT_DATA_DIR"]) / "plugins/native-smoke/runtime.txt"
             assert marker.read_text(encoding="utf-8") == nonce
             result["checks"].extend(["quickjs", "sqlite", "host-http", "host-filesystem", "isolated-data"])
+            result["checks"].append("readonly-install-files")
             if https_url:
                 result["https"] = "passed"
 
@@ -189,6 +246,9 @@ def smoke(bin_dir: Path, https_url: str | None = None, temp_dir: Path | None = N
             assert not (unrelated / "usagestat").exists()
             result["version"] = version
         finally:
+            for path, mode in install_modes.items():
+                if path.exists():
+                    path.chmod(mode)
             server.shutdown()
             server.server_close()
             thread.join(timeout=5)

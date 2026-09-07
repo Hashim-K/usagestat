@@ -9,6 +9,7 @@ from pathlib import Path
 import signal
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -40,7 +41,7 @@ def assert_stopped(address: tuple[str, int]) -> None:
 
 
 def check(binary: Path) -> dict:
-    result = {"checks": [], "windows_console_signals": "native console qualification still required"}
+    result = {"checks": []}
     with tempfile.TemporaryDirectory(prefix="usagestat probe cancellation ") as directory:
         root = Path(directory)
         env = isolated_env(root)
@@ -101,6 +102,26 @@ globalThis.__usagestat_plugin = { probe(ctx) {
                     assert child.returncode == 130, (child.returncode, stderr)
                     assert_stopped(address)
                     result["checks"].append(signum.name)
+                finally:
+                    if child.poll() is None:
+                        child.kill()
+                        child.wait(timeout=5)
+        else:
+            env["USAGESTAT_PROBE_TIMEOUT_SEC"] = "30"
+            for event in ["ctrl-c", "ctrl-break", "close"]:
+                ready = configure("helper", event)
+                child = subprocess.Popen(argv, cwd=root, env=env, stdout=subprocess.PIPE,
+                                         stderr=subprocess.PIPE, creationflags=subprocess.CREATE_NEW_CONSOLE)
+                try:
+                    address = read_address(ready, time.monotonic() + 8)
+                    sender = subprocess.run([sys.executable, str(Path(__file__).with_name("windows_console.py")),
+                                             str(child.pid), event], capture_output=True, timeout=5)
+                    # Closing that console can also terminate its sender.
+                    assert sender.returncode == 0 or event == "close", sender.stderr
+                    _, stderr = child.communicate(timeout=6)
+                    assert child.returncode == 130, (event, child.returncode, stderr)
+                    assert_stopped(address)
+                    result["checks"].append(event)
                 finally:
                     if child.poll() is None:
                         child.kill()

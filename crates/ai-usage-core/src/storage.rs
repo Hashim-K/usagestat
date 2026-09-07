@@ -116,7 +116,9 @@ fn protect_directory(path: &Path) -> io::Result<()> {
         use std::os::windows::fs::OpenOptionsExt;
         options.custom_flags(0x0200_0000 | 0x0020_0000); // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
     }
-    let file = options.open(path)?;
+    let file = options.open(path).map_err(|error| {
+        io::Error::new(error.kind(), format!("open private directory: {error}"))
+    })?;
     let metadata = file.metadata()?;
     if !metadata.is_dir() {
         return Err(io::Error::new(

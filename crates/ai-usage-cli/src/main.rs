@@ -387,6 +387,15 @@ fn resolve_source_mode(
 }
 
 fn main() -> Result<()> {
+    let shutdown = usagestat_core::signals::register()?;
+    let result = run_cli();
+    if shutdown.load(std::sync::atomic::Ordering::SeqCst) {
+        std::process::exit(130);
+    }
+    result
+}
+
+fn run_cli() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse_from(effective_args());
     let json = cli.json || cli.json_only;

@@ -250,7 +250,9 @@ fn run_inner(
     input: Option<&[u8]>,
 ) -> io::Result<Output> {
     validate_arguments(&command)?;
-    let token = current_cancellation();
+    let token = current_cancellation().or_else(|| {
+        crate::signals::current().map(|flag| CancellationToken::with_interrupt(Some(flag)))
+    });
     if token.as_ref().is_some_and(CancellationToken::is_cancelled) {
         return Err(io::Error::new(
             io::ErrorKind::Interrupted,
