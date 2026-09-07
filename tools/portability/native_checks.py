@@ -16,6 +16,7 @@ import traceback
 from native_smoke import isolated_env, smoke
 from probe_cancellation import check as check_probe_cancellation
 from daemon_lifecycle import check as check_daemon_lifecycle
+from diagnostics import check as check_diagnostics
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -76,6 +77,7 @@ def main() -> int:
                 suffix = ".exe" if os.name == "nt" else ""
                 report["probe_cancellation"] = check_probe_cancellation(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 report["daemon_lifecycle"] = check_daemon_lifecycle(target_dir / args.target / "debug")
+                report["diagnostics"] = check_diagnostics(target_dir / args.target / "debug", args.smoke_temp_dir)
                 if platform.system() == "Darwin":
                     env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
                     command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",

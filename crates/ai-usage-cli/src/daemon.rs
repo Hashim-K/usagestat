@@ -12,15 +12,15 @@ use usagestat_core::daemon_settings::{
 };
 use usagestat_core::{AppConfig, paths};
 
-#[cfg(test)]
-mod lifecycle_tests;
 #[cfg(any(target_os = "macos", test))]
 mod launchd;
+#[cfg(test)]
+mod lifecycle_tests;
 mod service;
-#[cfg(windows)]
-mod task_scheduler;
 #[cfg(any(target_os = "linux", test))]
 mod systemd;
+#[cfg(windows)]
+mod task_scheduler;
 use service::{Registration, ServiceManager};
 
 pub(super) fn dev_profile() -> bool {
@@ -479,6 +479,14 @@ fn service_status(
     manager: &dyn ServiceManager,
     settings: &DaemonSettings,
 ) -> Result<ServiceStatus> {
+    service_status_with_probe(manager, settings, true)
+}
+
+fn service_status_with_probe(
+    manager: &dyn ServiceManager,
+    settings: &DaemonSettings,
+    probe_t3: bool,
+) -> Result<ServiceStatus> {
     let mut diagnostics = Vec::new();
     let (registration, manager_available) = match manager.query() {
         Ok(registration) => (registration, manager.available()),
@@ -520,7 +528,8 @@ fn service_status(
         .as_ref()
         .map(|i| i.management_key_file.clone())
         .unwrap_or(paths::management_key_file()?);
-    let t3_available = settings.t3_mode == SavedT3Mode::Auto
+    let t3_available = probe_t3
+        && settings.t3_mode == SavedT3Mode::Auto
         && health.healthy
         && quota_endpoint_available(&url, &key_file);
     Ok(ServiceStatus {
@@ -543,6 +552,30 @@ fn service_status(
         dashboard_url: health.healthy.then(|| format!("{url}/dashboard")),
         hub_url: t3_available.then_some(url),
     })
+}
+
+/// Public diagnostics contain only fixed state and version fields. In
+/// particular, never return service XML, settings/environment or native errors.
+pub(super) fn diagnostic_status() -> Result<serde_json::Value> {
+    let manager = service::native()?;
+    let settings = load_settings(manager.as_ref())?;
+    let status = service_status_with_probe(manager.as_ref(), &settings, false)?;
+    let code = match status.condition {
+        "healthy" => "ready",
+        "stopped" | "unregistered" => "service-stopped",
+        "wrong-version" => "wrong-version",
+        "manager-unavailable" => "service-manager-unavailable",
+        "external" => "installation-owner-mismatch",
+        _ => "unhealthy",
+    };
+    Ok(serde_json::json!({
+        "code": code, "condition": status.condition, "manager": status.manager,
+        "managerAvailable": status.manager_available, "configured": status.configured,
+        "registered": status.registered, "autostart": status.autostart,
+        "running": status.running, "healthy": status.healthy,
+        "versionMatches": status.backend_version.as_deref() == Some(env!("CARGO_PKG_VERSION")),
+        "t3": "not-checked",
+    }))
 }
 
 fn wait_for_installation(installation: &Installation) -> Result<()> {
@@ -573,7 +606,7 @@ fn absolute(path: &Path) -> Result<PathBuf> {
     })
 }
 
-fn find_binary(explicit: Option<&Path>) -> Result<PathBuf> {
+pub(super) fn find_binary(explicit: Option<&Path>) -> Result<PathBuf> {
     let candidates = if let Some(path) = explicit {
         vec![path.to_path_buf()]
     } else {

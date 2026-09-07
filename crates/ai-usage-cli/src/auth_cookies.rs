@@ -88,6 +88,12 @@ pub fn import_cookies(
     provider_id: &str,
     web_url: &str,
 ) -> Result<CookieImportResult, CookieImportError> {
+    if !cfg!(target_os = "linux") {
+        return Err(CookieImportError {
+            error: "PLATFORM_UNSUPPORTED".to_string(),
+            message: "Automatic browser import is not implemented on this platform yet. Supply provider-specific manual credentials instead.".to_string(),
+        });
+    }
     let Some(host) = host_from_url(web_url) else {
         return Err(CookieImportError {
             error: "INVALID_WEB_URL".to_string(),

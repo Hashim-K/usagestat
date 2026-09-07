@@ -59,9 +59,9 @@ missing-native-directory errors and Windows `.exe` profile identity. Windows
 defaults use the Known Folder APIs through `dirs`; changing APPDATA alone is not
 claimed as a real Windows Known Folder redirection test.
 
-CLI, daemon and plugin host use the same fallible core path API. There is no
-doctor command in this committed baseline; #13 must use this API when integrating
-doctor/capability diagnostics. Actual provider data/credential paths remain #11.
+CLI, daemon, plugin host and doctor use the same fallible core path API.
+The [capabilities and diagnostics contract](capabilities.md) describes the
+read-only doctor command. Actual provider data/credential paths remain #11.
 
 ## Private state and helper lifecycle (#5, #6)
 

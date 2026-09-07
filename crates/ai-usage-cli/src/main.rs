@@ -2,6 +2,7 @@ mod auth_cookies;
 mod batch_probe;
 mod daemon;
 mod dashboard;
+mod doctor;
 mod history;
 
 use anyhow::{Context, Result};
@@ -72,6 +73,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Report implemented platform features without accessing credentials
+    Capabilities,
+    /// Diagnose local installation and service health without changing settings
+    Doctor,
     /// Open the usage dashboard in your default browser
     Dashboard {
         /// Print the dashboard URL without opening a browser
@@ -406,6 +411,9 @@ fn run_cli() -> Result<()> {
         &cli.verbose,
         &cli.no_color,
     );
+    if matches!(cli.command, Some(Command::Doctor)) {
+        return doctor::run(cli.config.as_deref(), &cli.plugin_dirs, json);
+    }
     let config_path = match cli.config.clone() {
         Some(path) => path,
         None => paths::config_file()?,
@@ -438,8 +446,14 @@ fn run_cli() -> Result<()> {
         augment_debug: false,
         no_credits: false,
     }) {
-        Command::Daemon { .. } | Command::Dashboard { .. } => {
+        Command::Doctor | Command::Daemon { .. } | Command::Dashboard { .. } => {
             unreachable!("daemon and dashboard commands are handled before provider discovery")
+        }
+        Command::Capabilities => {
+            let report =
+                usagestat_core::capabilities::current(&provider_summaries(&providers, &config));
+            println!("{}", serde_json::to_string_pretty(&report)?);
+            Ok(())
         }
         Command::Usage {
             provider_ids,
@@ -657,6 +671,8 @@ fn effective_args() -> Vec<OsString> {
                 "usage"
                     | "daemon"
                     | "dashboard"
+                    | "doctor"
+                    | "capabilities"
                     | "list"
                     | "probe"
                     | "status"

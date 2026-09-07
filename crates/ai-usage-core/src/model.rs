@@ -108,6 +108,59 @@ pub struct UsageSnapshot {
     /// Pace tracking relative to reset window. null if no reset window on primary metric.
     #[serde(default)]
     pub pace: Option<Pace>,
+    /// Additive machine-readable state. Old caches/clients may omit or ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state: Option<ProviderState>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProviderState {
+    Ready,
+    Unsupported,
+    MissingAuth,
+    NoData,
+    CredentialDenied,
+    CredentialUnavailable,
+    CredentialAccountMismatch,
+    CredentialMalformed,
+    TimedOut,
+    Failed,
+}
+impl ProviderState {
+    pub fn from_message(message: &str) -> Self {
+        let message = message.trim();
+        for (prefix, state) in [
+            ("unsupported:", Self::Unsupported),
+            ("credential-unsupported:", Self::Unsupported),
+            ("missing-auth:", Self::MissingAuth),
+            ("credential-missing:", Self::MissingAuth),
+            ("no-data:", Self::NoData),
+            ("credential-denied:", Self::CredentialDenied),
+            ("credential-unavailable:", Self::CredentialUnavailable),
+            (
+                "credential-account-mismatch:",
+                Self::CredentialAccountMismatch,
+            ),
+            ("credential-malformed:", Self::CredentialMalformed),
+            ("timed-out:", Self::TimedOut),
+        ] {
+            if message.starts_with(prefix)
+                || message.starts_with(&format!("keychain read failed: {prefix}"))
+            {
+                return state;
+            }
+        }
+        // Preserve explicit legacy provider and deadline messages. Unknown
+        // errors stay failed; never infer authentication from an empty dataset.
+        if message.starts_with("Not logged in.") {
+            Self::MissingAuth
+        } else if message.starts_with("Probe timed out") {
+            Self::TimedOut
+        } else {
+            Self::Failed
+        }
+    }
 }
 
 impl UsageSnapshot {
@@ -116,6 +169,8 @@ impl UsageSnapshot {
         display_name: impl Into<String>,
         message: impl Into<String>,
     ) -> Self {
+        let message = message.into();
+        let state = ProviderState::from_message(&message);
         Self {
             provider_id: provider_id.into(),
             display_name: display_name.into(),
@@ -123,13 +178,14 @@ impl UsageSnapshot {
             plan: None,
             metrics: vec![MetricLine::Badge {
                 label: "Error".to_string(),
-                text: message.into(),
+                text: message,
                 color: Some("red".to_string()),
                 subtitle: None,
             }],
             fetched_at: Utc::now(),
             status_page_url: None,
             pace: None,
+            state: Some(state),
         }
     }
 

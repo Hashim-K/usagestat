@@ -329,6 +329,13 @@ fn route(
         return response_json(200, "OK", &body.to_string());
     }
 
+    if path == "/v1/capabilities" {
+        let providers = state.lock().expect("app state poisoned").providers.clone();
+        let body = serde_json::to_string(&usagestat_core::capabilities::current(&providers))
+            .expect("serialize capabilities");
+        return response_json(200, "OK", &body);
+    }
+
     if path == "/dashboard" || path == "/" {
         return response_html(200, "OK", DASHBOARD_HTML);
     }

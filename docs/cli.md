@@ -11,6 +11,11 @@ The CLI is intended to grow into a superset of CodexBar's CLI capabilities.
 `usage`, `status`, `cost`, `config`, and `cache` mirror CodexBar's command
 families where the backend already has equivalent data.
 
+Use `usagestat capabilities --json` to discover implemented platform features,
+or `usagestat doctor --json` to diagnose configuration, resources, helper
+discovery and native service health without probing credentials or changing
+settings. See the [capabilities and diagnostics contract](capabilities.md).
+
 Future provider UX work should consider standardizing common usage-window
 labels and ordering across plugins. CodexBar tracks this as a low-priority
 polish item so providers with comparable limits are easier to scan side by

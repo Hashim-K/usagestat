@@ -15,7 +15,7 @@ pub fn probe_provider(
         return UsageSnapshot::error(
             provider.manifest.id.clone(),
             provider.manifest.name.clone(),
-            error,
+            format!("unsupported: {error}"),
         );
     }
 
@@ -87,6 +87,15 @@ fn run_in_context(
     let source = result.get::<_, String>("source").ok();
     let plan = result.get::<_, String>("plan").ok();
     let metrics = parse_metrics(&result)?;
+    let state = result
+        .get::<_, String>("state")
+        .ok()
+        .and_then(|state| serde_json::from_value(serde_json::Value::String(state)).ok())
+        .unwrap_or(if metrics.is_empty() {
+            usagestat_core::model::ProviderState::NoData
+        } else {
+            usagestat_core::model::ProviderState::Ready
+        });
 
     Ok(UsageSnapshot {
         provider_id: provider.manifest.id.clone(),
@@ -97,6 +106,7 @@ fn run_in_context(
         fetched_at: Utc::now(),
         status_page_url: None,
         pace: None,
+        state: Some(state),
     })
 }
 
@@ -116,6 +126,15 @@ fn extract_error_string(ctx: &Ctx<'_>) -> String {
         let message = value.get::<_, String>("message").unwrap_or_default();
         let trimmed = message.trim();
         if !trimmed.is_empty() {
+            if let Ok(code) = value.get::<_, String>("code") {
+                if serde_json::from_value::<usagestat_core::model::ProviderState>(
+                    serde_json::Value::String(code.clone()),
+                )
+                .is_ok_and(|state| state != usagestat_core::model::ProviderState::Ready)
+                {
+                    return format!("{code}: {trimmed}");
+                }
+            }
             return trimmed.to_string();
         }
     }
@@ -250,10 +269,6 @@ fn parse_metrics(result: &Object<'_>) -> Result<Vec<MetricLine>, String> {
                 "unknown metric type at index {idx}: {line_type}"
             ))),
         }
-    }
-
-    if out.is_empty() {
-        return Err("plugin returned no metrics".to_string());
     }
 
     Ok(out)

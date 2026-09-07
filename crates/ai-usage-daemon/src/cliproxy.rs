@@ -227,6 +227,7 @@ mod tests {
 
     fn snapshot(id: &str) -> UsageSnapshot {
         UsageSnapshot {
+            state: None,
             provider_id: id.to_string(),
             display_name: id.to_string(),
             source: Some("oauth".to_string()),

@@ -82,6 +82,11 @@ def check(bin_dir: Path) -> dict:
 
         child, health = launch()
         try:
+            capabilities = request("/v1/capabilities")
+            assert capabilities["schemaVersion"] == 1 and capabilities["backendVersion"] == health["version"]
+            assert isinstance(request("/v1/providers"), list)
+            assert capabilities["features"]["credentials.genericPassword"]["runtime"] == "not-checked"
+            result["checks"].append("additive-capabilities-preserve-health-and-provider-array")
             assert health["application"] == "usagestat" and health["owner"] == str(root)
             assert health["status"] == "ok" and health["version"]
             with socket.create_connection(("127.0.0.1", int(bind.rsplit(":", 1)[1])), timeout=2) as stream:
