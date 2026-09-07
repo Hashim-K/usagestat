@@ -34,15 +34,19 @@ pub(super) fn native() -> Result<Box<dyn ServiceManager>> {
     {
         Ok(Box::new(super::launchd::LaunchAgent::new()?))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        Ok(Box::new(super::task_scheduler::ScheduledTask::new()?))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         Ok(Box::new(Unavailable))
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 struct Unavailable;
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 impl ServiceManager for Unavailable {
     fn kind(&self) -> &'static str {
         "none"

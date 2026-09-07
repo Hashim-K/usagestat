@@ -1996,6 +1996,7 @@ dependencies = [
  "tabled",
  "usagestat-core",
  "usagestat-plugins",
+ "windows",
 ]
 
 [[package]]
@@ -2052,6 +2053,14 @@ dependencies = [
  "sha2",
  "toml",
  "usagestat-core",
+]
+
+[[package]]
+name = "usagestat-service"
+version = "1.0.3"
+dependencies = [
+ "usagestat-core",
+ "windows",
 ]
 
 [[package]]

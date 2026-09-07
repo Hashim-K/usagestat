@@ -243,14 +243,23 @@ pub fn create_once(path: &Path, bytes: &[u8]) -> io::Result<bool> {
 }
 
 pub fn append_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    open_private_append(path)?.write_all(bytes)
+}
+
+pub fn open_private_append(path: &Path) -> io::Result<File> {
     create_missing_directories(parent(path)?)?;
     reject_link(path)?;
     let mut options = OpenOptions::new();
     options.create(true).append(true);
     no_follow(&mut options);
-    let mut file = options.open(path)?;
+    let file = options.open(path)?;
     validate_file(&file)?;
-    file.write_all(bytes)
+    Ok(file)
+}
+
+#[cfg(windows)]
+pub fn current_user_sid() -> io::Result<String> {
+    platform::current_sid()
 }
 
 pub fn temporary_directory() -> io::Result<tempfile::TempDir> {

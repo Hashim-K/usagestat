@@ -17,6 +17,8 @@ mod lifecycle_tests;
 #[cfg(any(target_os = "macos", test))]
 mod launchd;
 mod service;
+#[cfg(windows)]
+mod task_scheduler;
 #[cfg(any(target_os = "linux", test))]
 mod systemd;
 use service::{Registration, ServiceManager};

@@ -80,6 +80,12 @@ def main() -> int:
                     env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
                     command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",
                             "--target", args.target, "isolated_native_launchagent_lifecycle", "--", "--ignored", "--nocapture"])
+                if os.name == "nt":
+                    from windows_service import check as check_windows_service
+                    report["windows_service"] = check_windows_service(target_dir / args.target / "debug" / "usagestat-service.exe")
+                    env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd.exe")
+                    command("scheduled-task-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",
+                            "--target", args.target, "isolated_native_scheduled_task_lifecycle", "--", "--ignored", "--nocapture"])
             else:
                 report["smoke"] = {"status": "blocked", "reason": "native build failed; see build.log"}
         except Exception as error:

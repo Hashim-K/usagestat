@@ -34,6 +34,9 @@ serde_json.workspace = true
 sha1.workspace = true
 tabled.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_System_TaskScheduler", "Win32_System_Com", "Win32_System_Variant", "Win32_System_Ole", "Win32_Security"] }
+
 [package.metadata.deb]
 name = "usagestat"
 maintainer = "Hashim-K <Hashim-K@users.noreply.github.com>"
