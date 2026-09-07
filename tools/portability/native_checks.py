@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+import traceback
 
 from native_smoke import isolated_env, smoke
 from probe_cancellation import check as check_probe_cancellation
@@ -19,6 +20,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def main() -> int:
+    # Redirected Windows consoles default to a legacy code page. Node and Rust
+    # logs include Unicode paths and result glyphs; retain them in CI output.
+    sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="backslashreplace")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True)
     parser.add_argument("--report-dir", type=Path, default=ROOT / "target/native-results")
@@ -50,8 +55,8 @@ def main() -> int:
             with (report_dir / f"{name}.log").open("w", encoding="utf-8") as output:
                 completed = subprocess.run(argv, cwd=ROOT, env=env, stdout=output,
                                            stderr=subprocess.STDOUT, timeout=1800)
-            print((report_dir / f"{name}.log").read_text(encoding="utf-8", errors="replace"), flush=True)
             report["checks"].append({"name": name, "command": argv, "exit_code": completed.returncode})
+            print((report_dir / f"{name}.log").read_text(encoding="utf-8", errors="replace"), flush=True)
             return completed.returncode == 0
 
         try:
@@ -73,6 +78,7 @@ def main() -> int:
                 report["smoke"] = {"status": "blocked", "reason": "native build failed; see build.log"}
         except Exception as error:
             report["error"] = str(error)
+            traceback.print_exc()
         finally:
             (report_dir / "report.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     return int(bool(report.get("error")) or any(check["exit_code"] for check in report["checks"]))

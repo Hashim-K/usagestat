@@ -30,6 +30,7 @@ jobs:
     timeout-minutes: 40
     env:
       CARGO_TERM_COLOR: never
+      PYTHONUTF8: '1'
       MACOSX_DEPLOYMENT_TARGET: '11.0'
     steps:
       - uses: actions/checkout@v4
