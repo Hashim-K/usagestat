@@ -5,6 +5,12 @@ macOS packages remain pending public qualification. The currently published
 Homebrew formula supports Linux. The existing owned tap is
 [`hashimkarim/homebrew-tap`](https://github.com/hashimkarim/homebrew-tap).
 
+[Release rehearsal 34087543142](https://github.com/hashimkarim/usagestat/actions/runs/34087543142)
+at `e04efb6` passed both native Homebrew installation/revision-upgrade/removal jobs,
+all five archive builds and all five npm installation rehearsals. Publication
+jobs were skipped. This evidence predates later daemon unregister/relocation work;
+those changes still need the final candidate rerun.
+
 The release workflow builds separate Intel and Apple Silicon archives containing
 `usagestat`, `usagestatd`, bundled plugins/icons and license notices. No Node or
 Rust installation is needed for the native archive/Homebrew payload. npm is a
@@ -26,6 +32,11 @@ and installation does not enable startup. The bar should discover an explicit
 CLI path or a durable installed link, then use the backend's capabilities and
 saved owner. A bundled desktop backend has a different owner and requires an
 explicit owner switch before taking over an existing profile.
+
+For development, `python tools/portability/stage_dev.py --output target/native-dev-first`
+builds/stages both renamed dev executables and resources in a fresh directory.
+It uses the `usagestat-dev` profile without changing a login registration or PATH.
+See the [portable development workflow](windows-distribution.md#native-development-build).
 
 For a disposable CI rehearsal, the same generator can produce local `file:` URLs:
 

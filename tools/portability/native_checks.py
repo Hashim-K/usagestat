@@ -22,6 +22,7 @@ from local_usage import check as check_local_usage
 from provider_storage import check as check_provider_storage
 from codex_auth import check as check_codex_auth
 from browser_import import check as check_browser_import
+from dev_install import check as check_dev_install
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -92,6 +93,7 @@ def main() -> int:
                     "node", str(ROOT / "tools/portability/bar_contract.cjs"),
                     str(target_dir / args.target / "debug" / ("usagestat" + suffix)),
                 ], env=env, text=True, encoding="utf-8", timeout=120))
+                report["dev_install"] = check_dev_install(target_dir / args.target / "debug", args.target)
                 if platform.system() == "Darwin":
                     env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
                     command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",

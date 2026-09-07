@@ -8,6 +8,8 @@ from a source checkout, see [development](../README.md#development).
 The native macOS Homebrew adapter and installation rehearsal are tracked in
 [macOS distribution](macos-distribution.md). macOS public availability and signing
 remain pending; the commands for published Linux packages below retain their scope.
+Windows candidate ZIP and native development instructions are in
+[Windows distribution](windows-distribution.md).
 
 ## Arch Linux / AUR
 
