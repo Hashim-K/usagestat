@@ -41,3 +41,24 @@ the production reqwest/rustls client but does not prove an external TLS handshak
 corporate proxy behavior, browser import, real provider authentication, or a
 minimum OS floor. Record those separately during their owning qualification
 issues instead of inferring support from this gate.
+
+## Portable paths and installed resources (#4)
+
+At [`3969111`](https://github.com/hashimkarim/usagestat/commit/3969111),
+[run 34070642719](https://github.com/hashimkarim/usagestat/actions/runs/34070642719)
+passed the path unit tests and all 16 installed-runtime checks on every target
+above. Windows completed these checks and all Rust tests before a later console
+shutdown test failed; that separate failure remains tracked in #5.
+
+The installed checks discover every committed provider manifest and absolute icon
+path from an unrelated working directory. They exercise flat archives, prefix
+share/lib layouts, npm bin/resources, macOS app resources, and dev binaries. They
+also exercise Unicode/spaces, explicit redirected config/data directories, absent
+HOME on Windows, and a read-only installation tree. Pure resolver tests verify
+missing-native-directory errors and Windows `.exe` profile identity. Windows
+defaults use the Known Folder APIs through `dirs`; changing APPDATA alone is not
+claimed as a real Windows Known Folder redirection test.
+
+CLI, daemon and plugin host use the same fallible core path API. There is no
+doctor command in this committed baseline; #13 must use this API when integrating
+doctor/capability diagnostics. Actual provider data/credential paths remain #11.
