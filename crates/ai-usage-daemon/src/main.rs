@@ -260,6 +260,12 @@ fn handle_connection(
     refresh_flag: Arc<AtomicBool>,
     management: Arc<cliproxy::ManagementApi>,
 ) {
+    // Winsock accept inherits the listener's nonblocking mode. A request can
+    // arrive in several packets; keep this bounded handler blocking so partial
+    // headers are read completely instead of treating WouldBlock as bad HTTP.
+    if stream.set_nonblocking(false).is_err() {
+        return;
+    }
     let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
     let _ = stream.set_write_timeout(Some(Duration::from_secs(5)));
     let response = match http_request::read_request(&mut stream) {

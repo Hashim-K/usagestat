@@ -84,6 +84,16 @@ def check(bin_dir: Path) -> dict:
         try:
             assert health["application"] == "usagestat" and health["owner"] == str(root)
             assert health["status"] == "ok" and health["version"]
+            with socket.create_connection(("127.0.0.1", int(bind.rsplit(":", 1)[1])), timeout=2) as stream:
+                for fragment in [b"GET /health HTTP/1.1\r\n", b"Host: localhost\r\n", b"Connection: close\r\n\r\n"]:
+                    stream.sendall(fragment)
+                    time.sleep(0.03)
+                received = bytearray()
+                while chunk := stream.recv(4096):
+                    received.extend(chunk)
+                headers, body = received.split(b"\r\n\r\n", 1)
+                assert headers.startswith(b"HTTP/1.1 200") and json.loads(body)["pid"] == child.pid
+            result["checks"].append("fragmented-native-http-headers")
             status = json.loads(run(cli, ["--json", "daemon", "status"], root, env))
             assert status["configured"] and status["healthy"] and status["condition"] == "healthy", status
             assert status["backendVersion"] == health["version"]
