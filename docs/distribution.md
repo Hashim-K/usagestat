@@ -1,5 +1,9 @@
 # Release distribution
 
+The native npm distribution is being prepared in #21. See
+[npm packaging and release setup](npm-distribution.md) for staged packages,
+scripts-disabled installation tests and pending first-publication setup.
+
 This page is for maintainers. For published package availability and user-facing
 install, upgrade, and removal commands, see the [installation guide](installation.md).
 

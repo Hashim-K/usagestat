@@ -256,9 +256,9 @@ fn execute(
             t3,
             switch_owner,
         } => {
-            manager.validate()?;
             let binary = find_binary(binary.as_deref())?;
             let owner = installation_owner(&binary)?;
+            manager.validate()?;
             if !switch_owner
                 && settings
                     .installation

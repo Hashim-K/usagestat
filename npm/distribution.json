@@ -1,0 +1,9 @@
+{
+  "name": "@hashimkarim/usagestat",
+  "platformPrefix": "@hashimkarim/usagestat-",
+  "registry": "https://registry.npmjs.org/",
+  "node": ">=24",
+  "npm": ">=11.5.1",
+  "repository": "https://github.com/hashimkarim/usagestat.git",
+  "publicationEnabled": false
+}

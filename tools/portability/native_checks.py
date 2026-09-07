@@ -64,7 +64,7 @@ def main() -> int:
         try:
             built = command("build", ["cargo", "build", "--locked", "--workspace", "--target", args.target])
             command("rust-tests", ["cargo", "test", "--locked", "--workspace", "--target", args.target])
-            node_tests = sorted(ROOT.glob("tests/*.test.cjs")) + sorted(ROOT.glob("crates/ai-usage-daemon/tests/*.test.cjs"))
+            node_tests = sorted(ROOT.glob("tests/*.test.cjs")) + sorted(ROOT.glob("crates/ai-usage-daemon/tests/*.test.cjs")) + sorted(ROOT.glob("npm/*.test.cjs"))
             if node_tests:
                 # Expand here: Windows subprocess does not expand shell globs.
                 command("node-tests", ["node", "--test", *[str(path) for path in node_tests]])
