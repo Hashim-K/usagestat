@@ -3,7 +3,7 @@ use anyhow::{Context, Result, bail};
 use clap::{Subcommand, ValueEnum};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -14,9 +14,7 @@ const UNIT: &str = "usagestat.service";
 const MARKER: &str = "# Managed by usagestat daemon enable\n";
 
 pub(super) fn dev_profile() -> bool {
-    paths::config_dir()
-        .file_name()
-        .is_some_and(|name| name == "usagestat-dev")
+    paths::is_dev_profile()
 }
 
 fn service_name() -> &'static str {
@@ -187,7 +185,7 @@ pub fn run(
         bail!("daemon autostart currently requires Linux with a systemd user session");
     }
     let service = service_name();
-    let key_file = paths::config_dir().join("t3-management-key");
+    let key_file = paths::config_dir()?.join("t3-management-key");
     if matches!(command, DaemonCommand::Key) {
         let key = read_key(&key_file)
             .context("no usable management key; run `usagestat daemon t3 auto` first")?;
@@ -202,7 +200,7 @@ pub fn run(
         return Ok(());
     }
     let unit_file = service_unit_file()?;
-    let settings_file = paths::config_dir().join("daemon.json");
+    let settings_file = paths::config_dir()?.join("daemon.json");
     let old_unit = read_optional_unit(&unit_file)?;
     let mut settings = DaemonSettings::load(&settings_file, &old_unit, &key_file)?;
     let mut base_url = None;
@@ -216,7 +214,7 @@ pub fn run(
             systemctl(&["show-environment"])?;
             let binary = find_binary(binary.as_deref())?;
             let config = AppConfig::load_optional(config_path)?;
-            let plugin_dirs = paths::plugin_dirs(&config, extra_dirs)
+            let plugin_dirs = paths::plugin_dirs(&config, extra_dirs)?
                 .into_iter()
                 .map(|dir| absolute(&dir))
                 .collect::<Result<Vec<_>>>()?;
@@ -531,9 +529,10 @@ fn find_binary(explicit: Option<&Path>) -> Result<PathBuf> {
         } else {
             "usagestatd"
         };
-        let mut candidates = vec![std::env::current_exe()?.with_file_name(daemon_name)];
+        let daemon_name = format!("{daemon_name}{}", std::env::consts::EXE_SUFFIX);
+        let mut candidates = vec![std::env::current_exe()?.with_file_name(&daemon_name)];
         if let Some(path) = std::env::var_os("PATH") {
-            candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(daemon_name)));
+            candidates.extend(std::env::split_paths(&path).map(|dir| dir.join(&daemon_name)));
         }
         candidates
     };
@@ -578,7 +577,8 @@ fn read_key(path: &Path) -> Result<String> {
 fn ensure_key(path: &Path) -> Result<String> {
     fs::create_dir_all(path.parent().context("management key parent directory")?)?;
     let mut random = [0_u8; 32];
-    fs::File::open("/dev/urandom")?.read_exact(&mut random)?;
+    getrandom::getrandom(&mut random)
+        .map_err(|error| anyhow::anyhow!("generate management key: {error}"))?;
     let key: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
     let mut options = OpenOptions::new();
     options.write(true).create_new(true);
@@ -655,7 +655,7 @@ fn render_unit(
             ));
         }
     }
-    let env_file = paths::config_dir().join("daemon.env");
+    let env_file = paths::config_dir()?.join("daemon.env");
     let env_file = unit_quote(
         env_file
             .to_str()

@@ -30,6 +30,9 @@ pub fn probe_provider(
     let Ok(rt) = Runtime::new() else {
         return fallback();
     };
+    if let Some(cancellation) = usagestat_core::process::current_cancellation() {
+        rt.set_interrupt_handler(Some(Box::new(move || cancellation.is_cancelled())));
+    }
     let Ok(ctx) = Context::full(&rt) else {
         return fallback();
     };
@@ -133,7 +136,8 @@ fn inject_context(
     let app = Object::new(ctx.clone())?;
     app.set("version", env!("CARGO_PKG_VERSION"))?;
     app.set("platform", std::env::consts::OS)?;
-    let app_data_dir = paths::data_dir();
+    let app_data_dir = paths::data_dir()
+        .map_err(|error| rquickjs::Exception::throw_message(ctx, &error.to_string()))?;
     let plugin_data_dir = app_data_dir.join("plugins").join(&manifest.id);
     let _ = std::fs::create_dir_all(&plugin_data_dir);
     app.set("appDataDir", app_data_dir.to_string_lossy().to_string())?;

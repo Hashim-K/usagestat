@@ -14,6 +14,8 @@ const MAX_STORED_ROWS: usize = 25_000;
 
 #[derive(Debug, Error)]
 pub enum UsageDailyError {
+    #[error(transparent)]
+    Directory(#[from] paths::PathError),
     #[error("parse daily usage payload: {0}")]
     ParsePayload(#[from] serde_json::Error),
     #[error("read daily usage store {path}: {source}")]
@@ -171,7 +173,7 @@ pub fn ingest_json(provider_id: &str, payload_json: &str) -> Result<usize, Usage
         return Ok(0);
     }
 
-    let path = paths::usage_daily_file();
+    let path = paths::usage_daily_file()?;
     let mut store = read_store(&path)?;
     for row in new_rows {
         upsert_row(&mut store.rows, row);
@@ -212,7 +214,7 @@ pub fn selected_daily_rows(provider_id: &str) -> Result<Vec<UsageDailyRow>, Usag
     }
 
     let mut by_day: BTreeMap<String, UsageDailyRow> = BTreeMap::new();
-    for row in read_store(&paths::usage_daily_file())?.rows {
+    for row in read_store(&paths::usage_daily_file()?)?.rows {
         if !row.provider_id.eq_ignore_ascii_case(provider_id) {
             continue;
         }
@@ -228,7 +230,7 @@ pub fn selected_daily_rows(provider_id: &str) -> Result<Vec<UsageDailyRow>, Usag
 
 pub fn all_selected_daily_rows() -> Result<Vec<UsageDailyRow>, UsageDailyError> {
     let mut by_provider_day: BTreeMap<(String, String), UsageDailyRow> = BTreeMap::new();
-    for row in read_store(&paths::usage_daily_file())?.rows {
+    for row in read_store(&paths::usage_daily_file()?)?.rows {
         let key = (row.provider_id.to_ascii_lowercase(), row.date.clone());
         match by_provider_day.get(&key) {
             Some(existing) if !prefer_row(&row, existing) => {}

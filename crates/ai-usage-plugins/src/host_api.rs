@@ -6,11 +6,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value as JsonValue};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use usagestat_core::{paths, process};
 
 const ENV_ALLOWLIST: &[&str] = &[
     "USAGESTAT_PLUGIN_DIR",
@@ -137,9 +137,7 @@ const ENV_ALLOWLIST: &[&str] = &[
 ];
 
 const FIRECTL_TIMEOUT_SECS: u64 = 15;
-const FIRECTL_POLL_INTERVAL_MS: u64 = 50;
 const COMMAND_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
-const COMMAND_POLL_INTERVAL_MS: u64 = 50;
 const AWS_COST_EXPLORER_REGION: &str = "us-east-1";
 const AWS_COST_EXPLORER_SERVICE: &str = "ce";
 const AWS_COST_EXPLORER_TARGET: &str = "AWSInsightsIndexService.GetCostAndUsage";
@@ -1102,8 +1100,11 @@ fn inject_cursor_usage_export<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquick
     Ok(())
 }
 
-fn firectl_runner_candidates() -> [&'static str; 3] {
-    [
+fn firectl_runner_candidates() -> Vec<&'static str> {
+    if std::env::var_os("USAGESTAT_HELPER_PATH").is_some_and(|value| !value.is_empty()) {
+        return vec!["firectl"];
+    }
+    vec![
         "firectl",
         "/opt/homebrew/bin/firectl",
         "/usr/local/bin/firectl",
@@ -1111,24 +1112,19 @@ fn firectl_runner_candidates() -> [&'static str; 3] {
 }
 
 fn resolve_firectl_runner() -> Option<String> {
-    static FIRECTL_RUNNER: OnceLock<Option<String>> = OnceLock::new();
-    FIRECTL_RUNNER
-        .get_or_init(|| {
-            for candidate in firectl_runner_candidates() {
-                if Command::new(candidate)
-                    .arg("--help")
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|status| status.success())
-                    .unwrap_or(false)
-                {
-                    return Some(candidate.to_string());
-                }
-            }
-            None
-        })
-        .clone()
+    for candidate in firectl_runner_candidates() {
+        let Ok(mut command) = process::command(candidate) else {
+            continue;
+        };
+        let program = command.get_program().to_string_lossy().into_owned();
+        command.arg("--help");
+        if process::run(command, Duration::from_secs(5), 4096)
+            .is_ok_and(|output| output.status.success())
+        {
+            return Some(program);
+        }
+    }
+    None
 }
 
 fn fireworks_auth_ini_contents(api_key: &str) -> String {
@@ -1162,74 +1158,22 @@ fn cleanup_fireworks_export_dir(path: &Path) {
 }
 
 fn run_fireworks_billing_export_timeout(
-    command: &mut Command,
+    command: Command,
     plugin_id: &str,
     timeout: Duration,
 ) -> Result<std::process::Output, &'static str> {
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            log::warn!(
-                "[plugin:{}] failed to spawn firectl billing export: {}",
-                plugin_id,
-                error
-            );
-            return Err("runner_failed");
+    process::run(command, timeout, COMMAND_OUTPUT_LIMIT_BYTES).map_err(|error| {
+        log::warn!(
+            "[plugin:{}] firectl billing export failed: {}",
+            plugin_id,
+            error
+        );
+        if error.kind() == std::io::ErrorKind::TimedOut {
+            "timed_out"
+        } else {
+            "runner_failed"
         }
-    };
-
-    let mut stdout_reader = child.stdout.take().map(|mut stdout| {
-        std::thread::spawn(move || read_stream_capped(&mut stdout, COMMAND_OUTPUT_LIMIT_BYTES))
-    });
-    let mut stderr_reader = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || read_stream_capped(&mut stderr, COMMAND_OUTPUT_LIMIT_BYTES))
-    });
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = stdout_reader
-                    .take()
-                    .and_then(|reader| reader.join().ok())
-                    .unwrap_or_default();
-                let stderr = stderr_reader
-                    .take()
-                    .and_then(|reader| reader.join().ok())
-                    .unwrap_or_default();
-                return Ok(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) => {
-                if start.elapsed() > timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
-                    let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
-                    log::warn!(
-                        "[plugin:{}] firectl billing export timed out after {}s",
-                        plugin_id,
-                        timeout.as_secs()
-                    );
-                    return Err("timed_out");
-                }
-                std::thread::sleep(Duration::from_millis(FIRECTL_POLL_INTERVAL_MS));
-            }
-            Err(error) => {
-                log::warn!(
-                    "[plugin:{}] firectl billing export wait failed: {}",
-                    plugin_id,
-                    error
-                );
-                let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
-                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
-                return Err("runner_failed");
-            }
-        }
-    }
+    })
 }
 
 fn run_fireworks_billing_export(
@@ -1279,10 +1223,22 @@ fn run_fireworks_billing_export(
 
     let file_name = format!("{workspace_name}.csv");
     let output_path = temp_dir.join(&file_name);
-    let mut command = Command::new(&program);
+    let mut command = match process::command(&program) {
+        Ok(command) => command,
+        Err(error) => {
+            cleanup_fireworks_export_dir(&temp_dir);
+            log::warn!(
+                "[plugin:{}] failed to resolve firectl: {}",
+                plugin_id,
+                error
+            );
+            return serde_json::json!({ "status": "runner_failed" });
+        }
+    };
     command
         .current_dir(&temp_dir)
         .env("HOME", &temp_dir)
+        .env("USERPROFILE", &temp_dir)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .args([
@@ -1299,7 +1255,7 @@ fn run_fireworks_billing_export(
         ]);
 
     let result = run_fireworks_billing_export_timeout(
-        &mut command,
+        command,
         plugin_id,
         Duration::from_secs(FIRECTL_TIMEOUT_SECS),
     );
@@ -1559,14 +1515,16 @@ fn discover_language_server(request: &LsDiscoverRequest) -> Option<LsDiscoverRes
         return None;
     }
 
-    let output = if cfg!(target_os = "windows") {
+    if cfg!(target_os = "windows") {
         return None;
-    } else if cfg!(target_os = "macos") {
-        Command::new("ps").args(["-axo", "pid=,command="]).output()
-    } else {
-        Command::new("ps").args(["-eo", "pid=,args="]).output()
     }
-    .ok()?;
+    let mut command = process::command("ps").ok()?;
+    if cfg!(target_os = "macos") {
+        command.args(["-axo", "pid=,command="]);
+    } else {
+        command.args(["-eo", "pid=,args="]);
+    }
+    let output = process::run(command, Duration::from_secs(5), COMMAND_OUTPUT_LIMIT_BYTES).ok()?;
 
     if !output.status.success() {
         return None;
@@ -1660,7 +1618,9 @@ fn current_keychain_account() -> String {
 }
 
 fn read_command_stdout(program: &str, args: &[&str]) -> Option<String> {
-    let output = Command::new(program).args(args).output().ok()?;
+    let mut command = process::command(program).ok()?;
+    command.args(args);
+    let output = process::run(command, Duration::from_secs(5), COMMAND_OUTPUT_LIMIT_BYTES).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1729,13 +1689,14 @@ fn platform_keychain_delete(service: &str, account: Option<&str>) -> Result<(), 
 }
 
 fn macos_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
-    let mut command = Command::new("security");
+    let mut command = process::command("security").map_err(|error| error.to_string())?;
     command.arg("find-generic-password");
     if let Some(account) = account {
         command.args(["-a", account]);
     }
     command.args(["-s", service, "-w"]);
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(command_error(&output));
     }
@@ -1744,9 +1705,10 @@ fn macos_keychain_read(service: &str, account: Option<&str>) -> Result<String, S
 }
 
 fn macos_keychain_read_generic_item(service: &str) -> Result<KeychainPasswordItem, String> {
-    let mut inspect = Command::new("security");
+    let mut inspect = process::command("security").map_err(|error| error.to_string())?;
     inspect.args(["find-generic-password", "-s", service]);
-    let inspect_output = inspect.output().map_err(|error| error.to_string())?;
+    let inspect_output = process::run(inspect, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if !inspect_output.status.success() {
         return Err(command_error(&inspect_output));
     }
@@ -1762,9 +1724,10 @@ fn macos_keychain_read_generic_item(service: &str) -> Result<KeychainPasswordIte
 }
 
 fn macos_keychain_read_internet_password(server: &str) -> Result<KeychainPasswordItem, String> {
-    let mut inspect = Command::new("security");
+    let mut inspect = process::command("security").map_err(|error| error.to_string())?;
     inspect.args(["find-internet-password", "-s", server]);
-    let inspect_output = inspect.output().map_err(|error| error.to_string())?;
+    let inspect_output = process::run(inspect, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if !inspect_output.status.success() {
         return Err(command_error(&inspect_output));
     }
@@ -1776,11 +1739,14 @@ fn macos_keychain_read_internet_password(server: &str) -> Result<KeychainPasswor
     let account = parse_macos_security_attribute(&inspect_text, "acct")
         .ok_or_else(|| "keychain item has no account attribute".to_string())?;
 
-    let mut password_command = Command::new("security");
+    let mut password_command = process::command("security").map_err(|error| error.to_string())?;
     password_command.args(["find-internet-password", "-s", server, "-a", &account, "-w"]);
-    let password_output = password_command
-        .output()
-        .map_err(|error| error.to_string())?;
+    let password_output = process::run(
+        password_command,
+        Duration::from_secs(30),
+        COMMAND_OUTPUT_LIMIT_BYTES,
+    )
+    .map_err(|error| error.to_string())?;
     if !password_output.status.success() {
         return Err(command_error(&password_output));
     }
@@ -1790,13 +1756,14 @@ fn macos_keychain_read_internet_password(server: &str) -> Result<KeychainPasswor
 }
 
 fn macos_keychain_write(service: &str, account: Option<&str>, value: &str) -> Result<(), String> {
-    let mut command = Command::new("security");
+    let mut command = process::command("security").map_err(|error| error.to_string())?;
     command.args(["add-generic-password", "-U"]);
     if let Some(account) = account {
         command.args(["-a", account]);
     }
     command.args(["-s", service, "-w", value]);
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1805,13 +1772,14 @@ fn macos_keychain_write(service: &str, account: Option<&str>, value: &str) -> Re
 }
 
 fn macos_keychain_delete(service: &str, account: Option<&str>) -> Result<(), String> {
-    let mut command = Command::new("security");
+    let mut command = process::command("security").map_err(|error| error.to_string())?;
     command.arg("delete-generic-password");
     if let Some(account) = account {
         command.args(["-a", account]);
     }
     command.args(["-s", service]);
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1820,6 +1788,9 @@ fn macos_keychain_delete(service: &str, account: Option<&str>) -> Result<(), Str
 }
 
 fn linux_secret_tool_path() -> Option<&'static str> {
+    if std::env::var_os("USAGESTAT_HELPER_PATH").is_some_and(|value| !value.is_empty()) {
+        return Some("secret-tool");
+    }
     ["/usr/bin/secret-tool", "secret-tool"]
         .into_iter()
         .find(|candidate| {
@@ -1832,12 +1803,13 @@ fn linux_secret_tool_read(service: &str, account: Option<&str>) -> Result<String
     let Some(secret_tool) = linux_secret_tool_path() else {
         return Err("secret-tool not installed".to_string());
     };
-    let mut command = Command::new(secret_tool);
+    let mut command = process::command(secret_tool).map_err(|error| error.to_string())?;
     command.args(["lookup", "service", service]);
     if let Some(account) = account {
         command.args(["username", account]);
     }
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(command_error(&output));
     }
@@ -1853,7 +1825,7 @@ fn linux_secret_tool_write(
     let Some(secret_tool) = linux_secret_tool_path() else {
         return Err("secret-tool not installed".to_string());
     };
-    let mut command = Command::new(secret_tool);
+    let mut command = process::command(secret_tool).map_err(|error| error.to_string())?;
     command.args(["store", "--label", service, "service", service]);
     if let Some(account) = account {
         command.args(["username", account]);
@@ -1879,12 +1851,13 @@ fn linux_secret_tool_delete(service: &str, account: Option<&str>) -> Result<(), 
     let Some(secret_tool) = linux_secret_tool_path() else {
         return Err("secret-tool not installed".to_string());
     };
-    let mut command = Command::new(secret_tool);
+    let mut command = process::command(secret_tool).map_err(|error| error.to_string())?;
     command.args(["clear", "service", service]);
     if let Some(account) = account {
         command.args(["username", account]);
     }
-    let output = command.output().map_err(|error| error.to_string())?;
+    let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
+        .map_err(|error| error.to_string())?;
     if output.status.success() {
         Ok(())
     } else {
@@ -1916,80 +1889,8 @@ fn parse_macos_security_attribute(output: &str, attr: &str) -> Option<String> {
     None
 }
 
-fn run_command_with_capped_output(
-    command: &mut Command,
-    timeout: Duration,
-    poll_interval: Duration,
-    output_limit: usize,
-) -> Result<std::process::Output, String> {
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("command failed to start: {error}"))?;
-
-    let mut stdout_reader = child.stdout.take().map(move |mut stdout| {
-        std::thread::spawn(move || read_stream_capped(&mut stdout, output_limit))
-    });
-    let mut stderr_reader = child.stderr.take().map(move |mut stderr| {
-        std::thread::spawn(move || read_stream_capped(&mut stderr, output_limit))
-    });
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = stdout_reader
-                    .take()
-                    .and_then(|reader| reader.join().ok())
-                    .unwrap_or_default();
-                let stderr = stderr_reader
-                    .take()
-                    .and_then(|reader| reader.join().ok())
-                    .unwrap_or_default();
-                return Ok(std::process::Output {
-                    status,
-                    stdout,
-                    stderr,
-                });
-            }
-            Ok(None) if start.elapsed() > timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
-                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
-                return Err(format!("command timed out after {}ms", timeout.as_millis()));
-            }
-            Ok(None) => std::thread::sleep(poll_interval),
-            Err(error) => return Err(format!("command wait failed: {error}")),
-        }
-    }
-}
-
-fn read_stream_capped<R: Read>(reader: &mut R, limit: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(limit.min(8192));
-    let mut buffer = [0_u8; 8192];
-    loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => {
-                if output.len() < limit {
-                    let remaining = limit - output.len();
-                    output.extend_from_slice(&buffer[..read.min(remaining)]);
-                }
-            }
-            Err(_) => break,
-        }
-    }
-    output
-}
-
 fn decode_capped_output(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_string(),
-        Err(error) if error.error_len().is_none() => {
-            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
-        }
-        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
-    }
+    process::decode_output(bytes)
 }
 
 fn command_error(output: &std::process::Output) -> String {
@@ -2339,17 +2240,17 @@ fn execute_command_request(request: CommandRequest) -> Result<CommandResponse, S
         return Err("command timeout exceeds 30000ms".to_string());
     }
 
-    let mut command = Command::new(&request.program);
+    let mut command = process::command(&request.program).map_err(|error| error.to_string())?;
     command
         .args(&request.args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    let output = run_command_with_capped_output(
-        &mut command,
+    let output = process::run(
+        command,
         Duration::from_millis(request.timeout_ms),
-        Duration::from_millis(COMMAND_POLL_INTERVAL_MS),
         COMMAND_OUTPUT_LIMIT_BYTES,
-    )?;
+    )
+    .map_err(|error| error.to_string())?;
 
     Ok(CommandResponse {
         status: output.status.code().unwrap_or(-1),
@@ -2359,21 +2260,11 @@ fn execute_command_request(request: CommandRequest) -> Result<CommandResponse, S
 }
 
 fn expand_path(path: &str) -> PathBuf {
-    if path == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from(path));
-    }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(path)
+    paths::expand_home(path)
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
+    paths::home_dir()
 }
 
 fn default_method() -> String {

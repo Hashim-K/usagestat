@@ -7,8 +7,8 @@ use sha1::Sha1;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
+use usagestat_core::process;
 
 type Aes128CbcDec = cbc::Decryptor<Aes128>;
 
@@ -283,10 +283,9 @@ fn browser_passwords(app_ids: &[&str]) -> Vec<String> {
 }
 
 fn secret_tool_lookup(app_id: &str) -> Option<String> {
-    let output = Command::new("secret-tool")
-        .args(["lookup", "application", app_id])
-        .output()
-        .ok()?;
+    let mut command = process::command("secret-tool").ok()?;
+    command.args(["lookup", "application", app_id]);
+    let output = process::run(command, std::time::Duration::from_secs(30), 64 * 1024).ok()?;
     if !output.status.success() {
         return None;
     }

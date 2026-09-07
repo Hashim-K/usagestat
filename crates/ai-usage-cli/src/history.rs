@@ -19,8 +19,8 @@ pub struct SnapshotRecord {
     pub reset_time: Option<String>,
 }
 
-pub fn history_jsonl_path() -> PathBuf {
-    paths::data_dir().join("history.jsonl")
+pub fn history_jsonl_path() -> Result<PathBuf> {
+    Ok(paths::data_dir()?.join("history.jsonl"))
 }
 
 pub fn record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
@@ -39,7 +39,7 @@ pub fn record_from_snapshot(snapshot: &UsageSnapshot) -> SnapshotRecord {
 }
 
 pub fn append_jsonl(rec: &SnapshotRecord) -> Result<()> {
-    let path = history_jsonl_path();
+    let path = history_jsonl_path()?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).with_context(|| format!("create dir {:?}", parent))?;
     }

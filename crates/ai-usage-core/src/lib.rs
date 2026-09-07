@@ -4,6 +4,7 @@ pub mod manifest;
 pub mod model;
 pub mod normalized;
 pub mod paths;
+pub mod process;
 pub mod usage_daily;
 
 pub use cache::UsageCache;

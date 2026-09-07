@@ -55,13 +55,16 @@ fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
     let management = cliproxy::ManagementApi::load(cli.management_key_file.as_deref())?;
-    let config_path = cli.config.clone().unwrap_or_else(paths::config_file);
+    let config_path = match cli.config.clone() {
+        Some(path) => path,
+        None => paths::config_file()?,
+    };
     let config = AppConfig::load_optional(&config_path)
         .with_context(|| format!("load config {}", config_path.display()))?;
     let refresh_sec = cli.refresh_sec.unwrap_or(config.refresh_sec);
-    let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs);
-    let cache_path = paths::cache_file();
-    let history_path = paths::data_dir().join("history.jsonl");
+    let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs)?;
+    let cache_path = paths::cache_file()?;
+    let history_path = paths::data_dir()?.join("history.jsonl");
     let cache = UsageCache::load_optional(&cache_path)
         .with_context(|| format!("load cache {}", cache_path.display()))?;
 
@@ -571,7 +574,7 @@ fn scan_local_usage(provider: &str) -> Result<Vec<LocalUsageEvent>> {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    paths::home_dir()
 }
 
 fn scan_claude_usage() -> Result<Vec<LocalUsageEvent>> {
@@ -1339,7 +1342,11 @@ fn append_history_record(path: &std::path::Path, record: &SnapshotRecord) -> Res
 }
 
 fn read_history(provider_id: Option<&str>) -> Vec<SnapshotRecord> {
-    let path = paths::data_dir().join("history.jsonl");
+    // Startup already validates the native data directory.
+    let Ok(directory) = paths::data_dir() else {
+        return Vec::new();
+    };
+    let path = directory.join("history.jsonl");
     let Ok(text) = std::fs::read_to_string(&path) else {
         return Vec::new();
     };

@@ -1,0 +1,9 @@
+{
+  "id": "native-smoke",
+  "name": "Native runtime smoke test",
+  "entry": "plugin.js",
+  "icon": "icon.svg",
+  "enabledByDefault": false,
+  "supportedModes": ["local"],
+  "autoMode": "local"
+}

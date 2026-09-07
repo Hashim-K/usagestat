@@ -22,6 +22,7 @@ chrono.workspace = true
 clap.workspace = true
 dirs.workspace = true
 env_logger.workspace = true
+getrandom.workspace = true
 log.workspace = true
 pbkdf2.workspace = true
 reqwest.workspace = true

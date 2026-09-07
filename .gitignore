@@ -2,3 +2,4 @@
 inspo/
 target/
 dist/
+__pycache__/

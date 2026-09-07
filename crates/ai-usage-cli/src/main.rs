@@ -397,7 +397,10 @@ fn main() -> Result<()> {
         &cli.verbose,
         &cli.no_color,
     );
-    let config_path = cli.config.clone().unwrap_or_else(paths::config_file);
+    let config_path = match cli.config.clone() {
+        Some(path) => path,
+        None => paths::config_file()?,
+    };
     if let Some(Command::Dashboard { url, bind }) = &cli.command {
         return dashboard::run(*url, *bind, json);
     }
@@ -406,7 +409,7 @@ fn main() -> Result<()> {
     }
     let config = AppConfig::load_optional(&config_path)
         .with_context(|| format!("load config {}", config_path.display()))?;
-    let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs);
+    let plugin_dirs = paths::plugin_dirs(&config, &cli.plugin_dirs)?;
     let providers = discover_providers(&plugin_dirs);
 
     match cli.command.unwrap_or(Command::Usage {
@@ -1766,10 +1769,10 @@ fn run_cache_clear(
         });
     }
     if clear_snapshots {
-        results.push(clear_file("snapshots", paths::cache_file()));
+        results.push(clear_file("snapshots", paths::cache_file()?));
     }
     if clear_history {
-        results.push(clear_file("history", history::history_jsonl_path()));
+        results.push(clear_file("history", history::history_jsonl_path()?));
     }
 
     if json {

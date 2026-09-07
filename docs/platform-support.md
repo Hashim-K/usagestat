@@ -195,3 +195,19 @@ record toolchain/dependency versions and execute both binaries outside the sourc
 checkout, with isolated synthetic credentials and profiles. Deterministic local
 HTTP fixtures and external HTTPS/trust-store checks must be reported separately.
 The implementation issues remain open until their native acceptance checks pass.
+
+Run `python tools/portability/native_checks.py --target <native-rust-triple>` for
+the native build, Rust tests, dashboard tests, provider inventory, installed
+runtime smoke, and probe cancellation checks. Reports are saved under
+`target/native-results`. Use `--smoke-temp-dir` for a larger scratch volume when
+the default temporary filesystem cannot hold the debug binaries. Permission
+tests need a filesystem with native permission semantics.
+
+The shared path APIs now return an actionable error if a native config/data
+directory is unavailable; they never select the working directory as a fallback.
+Nonempty explicit overrides retain their established precedence. Cursor's native
+SQLite discovery uses the OS configuration directory and accepts
+`CURSOR_NIGHTLY_STATE_DB`, with `CURSOR_STATE_DB` as its legacy fallback.
+
+[Helper execution and cancellation](helper-processes.md) documents the native
+process runner, Windows shim handling, and the remaining lifecycle checks.

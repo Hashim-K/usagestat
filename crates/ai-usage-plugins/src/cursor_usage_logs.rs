@@ -22,7 +22,10 @@ pub enum CursorLogsStatus {
 pub fn query_daily_since(since: &str) -> (CursorLogsStatus, Vec<CursorDailyUsage>) {
     let since_date =
         parse_since_day(since).unwrap_or_else(|| Utc::now().date_naive() - Duration::days(30));
-    let projects = cursor_agent_home().join("projects");
+    let Some(home) = cursor_agent_home() else {
+        return (CursorLogsStatus::NoData, Vec::new());
+    };
+    let projects = home.join("projects");
     let mut files = Vec::new();
     collect_transcript_jsonl(&projects, &mut files);
 
@@ -58,26 +61,18 @@ pub fn query_daily_since(since: &str) -> (CursorLogsStatus, Vec<CursorDailyUsage
     (CursorLogsStatus::Ok, daily)
 }
 
-fn cursor_agent_home() -> PathBuf {
-    if let Ok(value) = std::env::var("CURSOR_AGENT_HOME") {
-        return expand_tilde(&value);
+fn cursor_agent_home() -> Option<PathBuf> {
+    if let Some(value) = std::env::var("CURSOR_AGENT_HOME")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+    {
+        return Some(expand_tilde(&value));
     }
-    dirs::home_dir()
-        .map(|home| home.join(".cursor"))
-        .unwrap_or_else(|| PathBuf::from(".cursor"))
+    usagestat_core::paths::home_dir().map(|home| home.join(".cursor"))
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
-    let trimmed = path.trim();
-    if trimmed == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
-    }
-    PathBuf::from(trimmed)
+    usagestat_core::paths::expand_home(path.trim())
 }
 
 fn parse_since_day(since: &str) -> Option<NaiveDate> {

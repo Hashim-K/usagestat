@@ -27,45 +27,43 @@ impl CursorInstall {
     }
 }
 
-fn expand_home(path: &str) -> PathBuf {
-    let trimmed = path.trim();
-    if trimmed == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    }
-    if let Some(rest) = trimmed.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
+fn platform_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = dirs::config_dir().into_iter().collect();
+    // Existing Linux installs may predate a redirected XDG_CONFIG_HOME.
+    #[cfg(target_os = "linux")]
+    if let Some(home) = usagestat_core::paths::home_dir() {
+        let legacy = home.join(".config");
+        if !roots.contains(&legacy) {
+            roots.push(legacy);
         }
     }
-    PathBuf::from(trimmed)
+    roots
 }
 
-fn platform_roots() -> Vec<PathBuf> {
-    vec![
-        expand_home("~/.config"),
-        expand_home("~/Library/Application Support"),
-        expand_home("~/AppData/Roaming"),
-    ]
+fn resolve_from_roots(install: CursorInstall, roots: &[PathBuf]) -> Option<PathBuf> {
+    roots
+        .iter()
+        .map(|root| root.join(install.app_dir_name()).join(STATE_DB_SUFFIX))
+        .find(|path| path.is_file())
 }
 
 /// `state.vscdb` for one install only (stable **or** nightly - never merged).
 pub fn resolve_cursor_state_db_for(install: CursorInstall) -> Option<PathBuf> {
-    if let Ok(custom) = std::env::var("CURSOR_STATE_DB") {
-        let custom = custom.trim();
-        if !custom.is_empty() {
-            let p = expand_home(custom);
-            if p.is_file() {
-                return Some(p);
-            }
+    let custom = if install == CursorInstall::Nightly {
+        std::env::var("CURSOR_NIGHTLY_STATE_DB")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| std::env::var("CURSOR_STATE_DB").ok())
+    } else {
+        std::env::var("CURSOR_STATE_DB").ok()
+    };
+    if let Some(custom) = custom.filter(|value| !value.trim().is_empty()) {
+        let path = usagestat_core::paths::expand_home(custom.trim());
+        if path.is_file() {
+            return Some(path);
         }
     }
-    for root in platform_roots() {
-        let p = root.join(install.app_dir_name()).join(STATE_DB_SUFFIX);
-        if p.is_file() {
-            return Some(p);
-        }
-    }
-    None
+    resolve_from_roots(install, &platform_roots())
 }
 
 pub fn resolve_cursor_state_db_for_plugin_id(plugin_id: &str) -> Option<PathBuf> {
@@ -77,28 +75,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stable_and_nightly_resolve_to_distinct_linux_paths() {
-        let stable = resolve_cursor_state_db_for(CursorInstall::Stable)
-            .map(|p| p.to_string_lossy().to_string());
-        let nightly = resolve_cursor_state_db_for(CursorInstall::Nightly)
-            .map(|p| p.to_string_lossy().to_string());
-        let stable_path = expand_home("~/.config/Cursor/User/globalStorage/state.vscdb");
-        let nightly_path = expand_home("~/.config/Cursor Nightly/User/globalStorage/state.vscdb");
-        if stable_path.is_file() {
+    fn native_redirected_roots_keep_stable_and_nightly_separate() {
+        let root =
+            std::env::temp_dir().join(format!("usagestat-cursor-paths-{}", std::process::id()));
+        let native = root.join("redirected 使用 config");
+        let legacy = root.join("legacy");
+        for base in [&native, &legacy] {
+            for install in [CursorInstall::Stable, CursorInstall::Nightly] {
+                let path = base.join(install.app_dir_name()).join(STATE_DB_SUFFIX);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, []).unwrap();
+            }
+        }
+        let roots = [native.clone(), legacy];
+        for install in [CursorInstall::Stable, CursorInstall::Nightly] {
             assert_eq!(
-                stable.as_deref(),
-                Some(stable_path.to_string_lossy().as_ref())
+                resolve_from_roots(install, &roots),
+                Some(native.join(install.app_dir_name()).join(STATE_DB_SUFFIX))
             );
         }
-        if nightly_path.is_file() {
-            assert_eq!(
-                nightly.as_deref(),
-                Some(nightly_path.to_string_lossy().as_ref())
-            );
-        }
-        if stable.is_some() && nightly.is_some() {
-            assert_ne!(stable, nightly);
-        }
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

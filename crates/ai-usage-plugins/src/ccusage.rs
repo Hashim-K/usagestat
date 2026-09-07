@@ -1,10 +1,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::ffi::{OsStr, OsString};
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use usagestat_core::{paths, process};
 
 const CCUSAGE_VERSION: &str = "20.0.2";
 const CCUSAGE_PACKAGE_NAME: &str = "ccusage";
@@ -14,7 +13,6 @@ const CCUSAGE_LEGACY_CLAUDE_PACKAGE_NAME: &str = "ccusage";
 const CCUSAGE_LEGACY_CODEX_PACKAGE_NAME: &str = "@ccusage/codex";
 const CCUSAGE_LEGACY_CODEX_BIN_NAME: &str = "ccusage-codex";
 const CCUSAGE_TIMEOUT_SECS: u64 = 30;
-const CCUSAGE_POLL_INTERVAL_MS: u64 = 100;
 const CCUSAGE_OUTPUT_LIMIT_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -162,67 +160,111 @@ fn runner_order() -> [CcusageRunnerKind; 5] {
 }
 
 fn runner_candidates(kind: CcusageRunnerKind) -> Vec<String> {
-    let mut candidates = Vec::new();
-    match kind {
-        CcusageRunnerKind::Bunx => {
-            if let Some(home) = dirs::home_dir() {
-                candidates.push(home.join(".bun/bin/bunx").to_string_lossy().to_string());
+    if std::env::var_os("USAGESTAT_HELPER_PATH").is_some_and(|value| !value.is_empty()) {
+        return vec![runner_name(kind).into()];
+    }
+    #[cfg(windows)]
+    return vec![runner_name(kind).into()];
+    #[cfg(not(windows))]
+    {
+        let mut candidates = Vec::new();
+        match kind {
+            CcusageRunnerKind::Bunx => {
+                if let Some(home) = paths::home_dir() {
+                    candidates.push(home.join(".bun/bin/bunx").to_string_lossy().to_string());
+                }
+                candidates.extend(
+                    ["/opt/homebrew/bin/bunx", "/usr/local/bin/bunx", "bunx"].map(String::from),
+                );
             }
-            candidates.extend(
-                ["/opt/homebrew/bin/bunx", "/usr/local/bin/bunx", "bunx"].map(String::from),
-            );
+            CcusageRunnerKind::PnpmDlx => {
+                candidates.extend(
+                    ["/opt/homebrew/bin/pnpm", "/usr/local/bin/pnpm", "pnpm"].map(String::from),
+                );
+            }
+            CcusageRunnerKind::YarnDlx => {
+                candidates.extend(
+                    ["/opt/homebrew/bin/yarn", "/usr/local/bin/yarn", "yarn"].map(String::from),
+                );
+            }
+            CcusageRunnerKind::NpmExec => {
+                candidates.extend(
+                    ["/opt/homebrew/bin/npm", "/usr/local/bin/npm", "npm"].map(String::from),
+                );
+            }
+            CcusageRunnerKind::Npx => {
+                candidates.extend(
+                    ["/opt/homebrew/bin/npx", "/usr/local/bin/npx", "npx"].map(String::from),
+                );
+            }
         }
-        CcusageRunnerKind::PnpmDlx => {
-            candidates.extend(
-                ["/opt/homebrew/bin/pnpm", "/usr/local/bin/pnpm", "pnpm"].map(String::from),
-            );
-        }
-        CcusageRunnerKind::YarnDlx => {
-            candidates.extend(
-                ["/opt/homebrew/bin/yarn", "/usr/local/bin/yarn", "yarn"].map(String::from),
-            );
-        }
-        CcusageRunnerKind::NpmExec => {
-            candidates
-                .extend(["/opt/homebrew/bin/npm", "/usr/local/bin/npm", "npm"].map(String::from));
-        }
-        CcusageRunnerKind::Npx => {
-            candidates
-                .extend(["/opt/homebrew/bin/npx", "/usr/local/bin/npx", "npx"].map(String::from));
-        }
-    }
 
-    let mut unique = Vec::new();
-    for candidate in candidates {
-        if !candidate.is_empty() && !unique.iter().any(|seen| seen == &candidate) {
-            unique.push(candidate);
+        let mut unique = Vec::new();
+        for candidate in candidates {
+            if !candidate.is_empty() && !unique.iter().any(|seen| seen == &candidate) {
+                unique.push(candidate);
+            }
         }
+        unique
     }
-    unique
+}
+
+fn runner_name(kind: CcusageRunnerKind) -> &'static str {
+    match kind {
+        CcusageRunnerKind::Bunx => "bunx",
+        CcusageRunnerKind::PnpmDlx => "pnpm",
+        CcusageRunnerKind::YarnDlx => "yarn",
+        CcusageRunnerKind::NpmExec => "npm",
+        CcusageRunnerKind::Npx => "npx",
+    }
 }
 
 fn path_entries_with(home: Option<&Path>, existing_path: Option<&OsStr>) -> Vec<PathBuf> {
-    let mut entries = Vec::new();
-    if let Some(home) = home {
-        entries.push(home.join(".bun/bin"));
-        entries.push(home.join(".nvm/current/bin"));
-        entries.extend(nvm_node_bin_paths(home));
-        entries.push(home.join(".local/bin"));
-    }
-    entries.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
-    if let Some(existing_path) = existing_path {
-        entries.extend(std::env::split_paths(existing_path));
-    }
-
-    let mut unique = Vec::new();
-    for entry in entries {
-        if !entry.as_os_str().is_empty() && !unique.iter().any(|seen| seen == &entry) {
-            unique.push(entry);
+    #[cfg(windows)]
+    {
+        let mut entries: Vec<PathBuf> = existing_path
+            .map(std::env::split_paths)
+            .into_iter()
+            .flatten()
+            .collect();
+        for key in ["PNPM_HOME", "NVM_SYMLINK"] {
+            if let Some(value) = std::env::var_os(key).filter(|value| !value.is_empty()) {
+                entries.push(PathBuf::from(value));
+            }
         }
+        if let Some(roaming) = dirs::data_dir() {
+            entries.push(roaming.join("npm"));
+        }
+        if let Some(home) = home {
+            entries.push(home.join(".bun/bin"));
+        }
+        return entries;
     }
-    unique
+    #[cfg(not(windows))]
+    {
+        let mut entries = Vec::new();
+        if let Some(home) = home {
+            entries.push(home.join(".bun/bin"));
+            entries.push(home.join(".nvm/current/bin"));
+            entries.extend(nvm_node_bin_paths(home));
+            entries.push(home.join(".local/bin"));
+        }
+        entries.extend(["/opt/homebrew/bin", "/usr/local/bin"].map(PathBuf::from));
+        if let Some(existing_path) = existing_path {
+            entries.extend(std::env::split_paths(existing_path));
+        }
+
+        let mut unique = Vec::new();
+        for entry in entries {
+            if !entry.as_os_str().is_empty() && !unique.iter().any(|seen| seen == &entry) {
+                unique.push(entry);
+            }
+        }
+        unique
+    }
 }
 
+#[cfg(not(windows))]
 fn nvm_node_bin_paths(home: &Path) -> Vec<PathBuf> {
     let nvm_dir = home.join(".nvm");
     let Some(version) = resolve_nvm_alias(&nvm_dir, "default", 0) else {
@@ -231,6 +273,7 @@ fn nvm_node_bin_paths(home: &Path) -> Vec<PathBuf> {
     vec![nvm_dir.join("versions/node").join(version).join("bin")]
 }
 
+#[cfg(not(windows))]
 fn resolve_nvm_alias(nvm_dir: &Path, alias: &str, depth: usize) -> Option<String> {
     if depth > 4 {
         return None;
@@ -254,21 +297,20 @@ fn resolve_nvm_alias(nvm_dir: &Path, alias: &str, depth: usize) -> Option<String
 }
 
 fn enriched_path() -> Option<OsString> {
-    let home = dirs::home_dir();
+    if let Some(path) = std::env::var_os("USAGESTAT_HELPER_PATH").filter(|path| !path.is_empty()) {
+        return Some(path);
+    }
+    let home = paths::home_dir();
     let existing_path = std::env::var_os("PATH");
     std::env::join_paths(path_entries_with(home.as_deref(), existing_path.as_deref())).ok()
 }
 
 fn runner_available(candidate: &str, enriched_path: Option<&OsStr>) -> bool {
-    let mut command = Command::new(candidate);
-    command
-        .arg("--version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    if let Some(path) = enriched_path {
-        command.env("PATH", path);
-    }
-    command.status().map(|s| s.success()).unwrap_or(false)
+    let Ok(mut command) = process::command_with_path(OsStr::new(candidate), enriched_path) else {
+        return false;
+    };
+    command.arg("--version");
+    process::run(command, Duration::from_secs(5), 4096).is_ok_and(|output| output.status.success())
 }
 
 fn collect_runners() -> Vec<(CcusageRunnerKind, String)> {
@@ -361,21 +403,6 @@ fn home_override(opts: &CcusageQueryOpts) -> Option<&str> {
         .filter(|s| !s.is_empty())
 }
 
-fn configure_command(command: &mut Command, args: &[String], path: Option<&OsStr>) {
-    command
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    if let Some(path) = path {
-        command.env("PATH", path);
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        command.process_group(0);
-    }
-}
-
 fn run_with_runner(
     kind: CcusageRunnerKind,
     program: &str,
@@ -401,110 +428,36 @@ fn run_with_runner_flavor(
 ) -> CcusageRunnerResult {
     let args = runner_args(kind, opts, provider, flavor);
     let path = enriched_path();
-    let mut command = Command::new(program);
-    configure_command(&mut command, &args, path.as_deref());
+    let Ok(mut command) = process::command_with_path(OsStr::new(program), path.as_deref()) else {
+        return CcusageRunnerResult::Failed;
+    };
+    command.args(&args);
     if let Some(home_path) = home_override(opts) {
         command.env(
             provider_config(provider).home_env_var,
-            expand_home(home_path),
+            paths::expand_home(home_path),
         );
     }
-
-    let mut child = match command.spawn() {
-        Ok(child) => child,
-        Err(_) => return CcusageRunnerResult::Failed,
-    };
-    let mut stdout_reader = child.stdout.take().map(|mut stdout| {
-        std::thread::spawn(move || read_stream_capped(&mut stdout, CCUSAGE_OUTPUT_LIMIT_BYTES))
-    });
-    let mut stderr_reader = child.stderr.take().map(|mut stderr| {
-        std::thread::spawn(move || read_stream_capped(&mut stderr, CCUSAGE_OUTPUT_LIMIT_BYTES))
-    });
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout = stdout_reader
-                    .take()
-                    .and_then(|reader| reader.join().ok())
-                    .unwrap_or_default();
-                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
-                if status.success() {
-                    let stdout = decode_capped_output(&stdout);
-                    return normalize_output(&stdout)
-                        .map(CcusageRunnerResult::Success)
-                        .unwrap_or(CcusageRunnerResult::Failed);
-                }
-                return CcusageRunnerResult::Failed;
-            }
-            Ok(None) if start.elapsed() > Duration::from_secs(CCUSAGE_TIMEOUT_SECS) => {
-                terminate_child(&mut child);
-                let _ = stdout_reader.take().and_then(|reader| reader.join().ok());
-                let _ = stderr_reader.take().and_then(|reader| reader.join().ok());
-                return CcusageRunnerResult::TimedOut;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(CCUSAGE_POLL_INTERVAL_MS)),
-            Err(_) => return CcusageRunnerResult::Failed,
+    match process::run(
+        command,
+        Duration::from_secs(CCUSAGE_TIMEOUT_SECS),
+        CCUSAGE_OUTPUT_LIMIT_BYTES,
+    ) {
+        Ok(output) if output.status.success() => {
+            normalize_output(&process::decode_output(&output.stdout))
+                .map(CcusageRunnerResult::Success)
+                .unwrap_or(CcusageRunnerResult::Failed)
         }
-    }
-}
-
-fn terminate_child(child: &mut std::process::Child) {
-    #[cfg(unix)]
-    {
-        let pgid = format!("-{}", child.id());
-        let _ = Command::new("kill")
-            .arg("-KILL")
-            .arg(pgid)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-    }
-    let _ = child.kill();
-    let _ = child.wait();
-}
-
-fn read_stream_capped<R: Read>(reader: &mut R, limit: usize) -> Vec<u8> {
-    let mut output = Vec::with_capacity(limit.min(8192));
-    let mut buffer = [0_u8; 8192];
-    loop {
-        match reader.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(read) => {
-                if output.len() < limit {
-                    let remaining = limit - output.len();
-                    output.extend_from_slice(&buffer[..read.min(remaining)]);
-                }
-            }
-            Err(_) => break,
+        Err(error)
+            if matches!(
+                error.kind(),
+                std::io::ErrorKind::TimedOut | std::io::ErrorKind::Interrupted
+            ) =>
+        {
+            CcusageRunnerResult::TimedOut
         }
+        _ => CcusageRunnerResult::Failed,
     }
-    output
-}
-
-fn decode_capped_output(bytes: &[u8]) -> String {
-    match std::str::from_utf8(bytes) {
-        Ok(text) => text.to_string(),
-        Err(error) if error.error_len().is_none() => {
-            String::from_utf8_lossy(&bytes[..error.valid_up_to()]).into_owned()
-        }
-        Err(_) => String::from_utf8_lossy(bytes).into_owned(),
-    }
-}
-
-fn expand_home(path: &str) -> String {
-    if path == "~" {
-        return dirs::home_dir()
-            .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.to_string());
-    }
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest).to_string_lossy().to_string();
-        }
-    }
-    path.to_string()
 }
 
 fn extract_last_json_value(stdout: &str) -> Option<String> {
@@ -649,6 +602,6 @@ mod tests {
         let mut bytes = "usage ".as_bytes().to_vec();
         bytes.extend_from_slice(&[0xE2, 0x82]);
 
-        assert_eq!(decode_capped_output(&bytes), "usage ");
+        assert_eq!(process::decode_output(&bytes), "usage ");
     }
 }
