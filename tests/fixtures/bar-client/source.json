@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/hashimkarim/usagestat-bar",
+  "commit": "72b062b90f2dd5e86d0ad35587f93794167aa495",
+  "license": "MIT",
+  "purpose": "Committed client contract fixture; excluded from runtime packages",
+  "files": {
+    "cli.js": "e10eb68b00b9fb2d63e9591d670e2121672ec99845b927175251579935a4e17d",
+    "provider-id.js": "8f486baa8a79c67514ba1b7d17e9d057ff9ddeb9523def9b7ae3439b478b3ece",
+    "LICENSE": "727f94cc1105799c8fc27bba848efa5090c284dcb426152ff92735ccc99f2f1d"
+  },
+  "sourceFiles": {
+    "cli.js": "e10eb68b00b9fb2d63e9591d670e2121672ec99845b927175251579935a4e17d",
+    "config.js": "e5358b301a3d8999aa78808a4ff663f9fc4c7d06b9fbe6236596e601dfecdc68"
+  },
+  "providerIdExtraction": "Unmodified providerBaseId and providerAlias function blocks from config.js"
+}

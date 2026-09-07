@@ -88,6 +88,10 @@ def main() -> int:
                 report["provider_storage"] = check_provider_storage(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 report["codex_auth"] = check_codex_auth(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 report["browser_import"] = check_browser_import(target_dir / args.target / "debug" / ("usagestat" + suffix))
+                report["bar_contract"] = json.loads(subprocess.check_output([
+                    "node", str(ROOT / "tools/portability/bar_contract.cjs"),
+                    str(target_dir / args.target / "debug" / ("usagestat" + suffix)),
+                ], env=env, text=True, encoding="utf-8", timeout=120))
                 if platform.system() == "Darwin":
                     env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
                     command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",

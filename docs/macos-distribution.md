@@ -49,7 +49,7 @@ Public installation commands will be `brew install hashimkarim/tap/usagestat`,
 `brew uninstall hashimkarim/tap/usagestat` once the Mac formula is qualified and
 published. Before removing a managed installation, use `usagestat daemon disable`.
 Uninstall retains configuration/history/credentials. Active-daemon upgrades,
-automatic migration of saved keg paths, failed replacement recovery, and
+failed replacement recovery, and
 bar/Homebrew coexistence still need their lifecycle implementation/acceptance;
 the revision fixture does not establish those behaviors.
 

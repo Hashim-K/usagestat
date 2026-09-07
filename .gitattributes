@@ -2,3 +2,4 @@
 /plugins/** -text
 /LICENSE -text
 /tools/publish/licenses/** -text
+/tests/fixtures/bar-client/** -text
