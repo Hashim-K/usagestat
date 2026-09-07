@@ -4,6 +4,13 @@ Implementation for #18 and #19. Browser import and manual provider credentials
 are separate methods. Native fixtures do not establish a working session with a
 real provider or current browser version; that qualification remains in #20.
 
+[Native run 34086413974](https://github.com/hashimkarim/usagestat/actions/runs/34086413974)
+at `a3ee0f9` passed all five supported build targets. Windows fixtures use actual
+DPAPI and authenticated synthetic AES-GCM data. Both Mac fixtures use an owned
+temporary Keychain, deleted after exact service/account reads; the login Keychain
+is not unlocked or replaced. The CLI fixture exercises a live SQLite writer,
+scoped import, explicit unsupported formats, locks and retained manual credentials.
+
 `auth import-cookies` reads the signed-in user's Chromium-family profile and
 returns the existing JSON contract (`providerId`, `cookieHeader`, `source`,
 `profile`). Import does not save, replace or clear provider configuration. The

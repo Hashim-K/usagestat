@@ -121,15 +121,15 @@ fn for_platform(
         ),
         (
             "browser.automaticImport",
-            Feature::new(native, "native-fixtures-pending"),
+            Feature::new(native, "native-fixtures"),
         ),
         (
             "browser.chromiumCbcImport",
-            Feature::new(matches!(os, "linux" | "macos"), "native-fixtures-pending"),
+            Feature::new(matches!(os, "linux" | "macos"), "native-fixtures"),
         ),
         (
             "browser.windowsDpapiImport",
-            Feature::new(os == "windows", "native-fixtures-pending"),
+            Feature::new(os == "windows", "native-fixtures"),
         ),
         (
             "browser.appBoundImport",
