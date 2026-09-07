@@ -1,5 +1,6 @@
 pub mod cache;
 pub mod config;
+pub mod credentials;
 pub mod daemon_settings;
 pub mod manifest;
 pub mod model;

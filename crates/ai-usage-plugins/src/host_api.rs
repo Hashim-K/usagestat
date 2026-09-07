@@ -490,6 +490,65 @@ fn inject_keychain<'js>(
     plugin_id: &str,
 ) -> rquickjs::Result<()> {
     let keychain_obj = Object::new(ctx.clone())?;
+    let capabilities = Object::new(ctx.clone())?;
+    capabilities.set(
+        "genericPassword",
+        cfg!(any(target_os = "linux", target_os = "macos", windows)),
+    )?;
+    capabilities.set(
+        "genericItemAccount",
+        cfg!(any(target_os = "macos", windows)),
+    )?;
+    capabilities.set("internetPassword", cfg!(target_os = "macos"))?;
+    capabilities.set("windowsExactTarget", cfg!(windows))?;
+    keychain_obj.set("capabilities", capabilities)?;
+
+    // Native stores use application-defined target names and blob encodings.
+    // These additive methods let a provider supply verified Windows semantics
+    // without guessing a keyring library's mapping or decoding its raw bytes.
+    keychain_obj.set(
+        "readWindowsGenericPassword",
+        Function::new(
+            ctx.clone(),
+            |inner: Ctx<'_>,
+             target: String,
+             account: Option<String>,
+             encoding: String|
+             -> rquickjs::Result<String> {
+                let read = || -> Result<String, usagestat_core::credentials::CredentialError> {
+                    let encoding = usagestat_core::credentials::Encoding::parse(&encoding)?;
+                    Ok(
+                        usagestat_core::credentials::read(&target, account.as_deref(), encoding)?
+                            .password,
+                    )
+                };
+                read().map_err(|error| Exception::throw_message(&inner, &error.to_string()))
+            },
+        )?,
+    )?;
+    keychain_obj.set(
+        "writeWindowsGenericPassword",
+        Function::new(
+            ctx.clone(),
+            |inner: Ctx<'_>,
+             target: String,
+             account: Option<String>,
+             value: String,
+             encoding: String|
+             -> rquickjs::Result<()> {
+                let write = || -> Result<(), usagestat_core::credentials::CredentialError> {
+                    let encoding = usagestat_core::credentials::Encoding::parse(&encoding)?;
+                    usagestat_core::credentials::write(
+                        &target,
+                        account.as_deref(),
+                        &value,
+                        encoding,
+                    )
+                };
+                write().map_err(|error| Exception::throw_message(&inner, &error.to_string()))
+            },
+        )?,
+    )?;
 
     let pid_read = plugin_id.to_string();
     keychain_obj.set(
@@ -508,10 +567,7 @@ fn inject_keychain<'js>(
                     .and_then(|value| non_empty_trimmed(&value));
                 log_keychain_read(&pid_read, &service, account.as_deref());
                 platform_keychain_read(&service, account.as_deref()).map_err(|error| {
-                    Exception::throw_message(
-                        &ctx_inner,
-                        &format!("keychain item not found: {error}"),
-                    )
+                    Exception::throw_message(&ctx_inner, &format!("keychain read failed: {error}"))
                 })
             },
         )?,
@@ -523,13 +579,11 @@ fn inject_keychain<'js>(
         Function::new(
             ctx.clone(),
             move |ctx_inner: Ctx<'_>, service: String| -> rquickjs::Result<String> {
-                let account = current_keychain_account();
+                let account = current_keychain_account()
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error))?;
                 log_keychain_read(&pid_read_current, &service, Some(&account));
                 platform_keychain_read(&service, Some(&account)).map_err(|error| {
-                    Exception::throw_message(
-                        &ctx_inner,
-                        &format!("keychain item not found: {error}"),
-                    )
+                    Exception::throw_message(&ctx_inner, &format!("keychain read failed: {error}"))
                 })
             },
         )?,
@@ -545,10 +599,7 @@ fn inject_keychain<'js>(
                     "[plugin:{pid_read_generic_item}] keychain generic item read: service={service}"
                 );
                 let item = platform_keychain_read_generic_item(&service).map_err(|error| {
-                    Exception::throw_message(
-                        &ctx_inner,
-                        &format!("keychain item not found: {error}"),
-                    )
+                    Exception::throw_message(&ctx_inner, &format!("keychain read failed: {error}"))
                 })?;
                 serde_json::to_string(&item).map_err(|error| {
                     Exception::throw_message(
@@ -570,10 +621,7 @@ fn inject_keychain<'js>(
                     "[plugin:{pid_read_internet}] keychain internet password read: server={server}"
                 );
                 let item = platform_keychain_read_internet_password(&server).map_err(|error| {
-                    Exception::throw_message(
-                        &ctx_inner,
-                        &format!("keychain item not found: {error}"),
-                    )
+                    Exception::throw_message(&ctx_inner, &format!("keychain read failed: {error}"))
                 })?;
                 serde_json::to_string(&item).map_err(|error| {
                     Exception::throw_message(
@@ -605,7 +653,8 @@ fn inject_keychain<'js>(
         Function::new(
             ctx.clone(),
             move |ctx_inner: Ctx<'_>, service: String, value: String| -> rquickjs::Result<()> {
-                let account = current_keychain_account();
+                let account = current_keychain_account()
+                    .map_err(|error| Exception::throw_message(&ctx_inner, &error))?;
                 log::info!(
                     "[plugin:{pid_write_current}] keychain write: service={service}, account={}",
                     redact_value(&account)
@@ -1584,17 +1633,24 @@ fn non_empty_trimmed(value: &str) -> Option<String> {
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-fn current_keychain_account() -> String {
-    std::env::var("USER")
-        .ok()
-        .and_then(|value| non_empty_trimmed(&value))
-        .or_else(|| {
-            std::env::var("USERNAME")
-                .ok()
-                .and_then(|value| non_empty_trimmed(&value))
-        })
-        .or_else(|| read_command_stdout("id", &["-un"]))
-        .unwrap_or_else(|| "usagestat-user".to_string())
+fn current_keychain_account() -> Result<String, String> {
+    #[cfg(windows)]
+    {
+        usagestat_core::credentials::current_user().map_err(|error| error.to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(std::env::var("USER")
+            .ok()
+            .and_then(|value| non_empty_trimmed(&value))
+            .or_else(|| {
+                std::env::var("USERNAME")
+                    .ok()
+                    .and_then(|value| non_empty_trimmed(&value))
+            })
+            .or_else(|| read_command_stdout("id", &["-un"]))
+            .unwrap_or_else(|| "usagestat-user".to_string()))
+    }
 }
 
 fn read_command_stdout(program: &str, args: &[&str]) -> Option<String> {
@@ -1619,20 +1675,49 @@ fn log_keychain_read(plugin_id: &str, service: &str, account: Option<&str>) {
 }
 
 fn platform_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
-    if cfg!(target_os = "macos") {
-        macos_keychain_read(service, account)
-    } else if cfg!(target_os = "linux") {
-        linux_secret_tool_read(service, account)
-    } else {
-        Err("keychain access is not supported on this platform".to_string())
+    #[cfg(windows)]
+    {
+        return usagestat_core::credentials::read(
+            service,
+            account,
+            usagestat_core::credentials::Encoding::Utf8,
+        )
+        .map(|item| item.password)
+        .map_err(|error| error.to_string());
+    }
+    #[cfg(not(windows))]
+    {
+        if cfg!(target_os = "macos") {
+            macos_keychain_read(service, account)
+        } else if cfg!(target_os = "linux") {
+            linux_secret_tool_read(service, account)
+        } else {
+            Err("keychain access is not supported on this platform".to_string())
+        }
     }
 }
 
 fn platform_keychain_read_generic_item(service: &str) -> Result<KeychainPasswordItem, String> {
-    if cfg!(target_os = "macos") {
-        macos_keychain_read_generic_item(service)
-    } else {
-        Err("keychain item account lookup is not supported on this platform".to_string())
+    #[cfg(windows)]
+    {
+        return usagestat_core::credentials::read(
+            service,
+            None,
+            usagestat_core::credentials::Encoding::Utf8,
+        )
+        .map(|item| KeychainPasswordItem {
+            account: item.account,
+            password: item.password,
+        })
+        .map_err(|error| error.to_string());
+    }
+    #[cfg(not(windows))]
+    {
+        if cfg!(target_os = "macos") {
+            macos_keychain_read_generic_item(service)
+        } else {
+            Err("keychain item account lookup is not supported on this platform".to_string())
+        }
     }
 }
 
@@ -1649,22 +1734,43 @@ fn platform_keychain_write(
     account: Option<&str>,
     value: &str,
 ) -> Result<(), String> {
-    if cfg!(target_os = "macos") {
-        macos_keychain_write(service, account, value)
-    } else if cfg!(target_os = "linux") {
-        linux_secret_tool_write(service, account, value)
-    } else {
-        Err("keychain access is not supported on this platform".to_string())
+    #[cfg(windows)]
+    {
+        return usagestat_core::credentials::write(
+            service,
+            account,
+            value,
+            usagestat_core::credentials::Encoding::Utf8,
+        )
+        .map_err(|error| error.to_string());
+    }
+    #[cfg(not(windows))]
+    {
+        if cfg!(target_os = "macos") {
+            macos_keychain_write(service, account, value)
+        } else if cfg!(target_os = "linux") {
+            linux_secret_tool_write(service, account, value)
+        } else {
+            Err("keychain access is not supported on this platform".to_string())
+        }
     }
 }
 
 fn platform_keychain_delete(service: &str, account: Option<&str>) -> Result<(), String> {
-    if cfg!(target_os = "macos") {
-        macos_keychain_delete(service, account)
-    } else if cfg!(target_os = "linux") {
-        linux_secret_tool_delete(service, account)
-    } else {
-        Err("keychain access is not supported on this platform".to_string())
+    #[cfg(windows)]
+    {
+        return usagestat_core::credentials::delete(service, account)
+            .map_err(|error| error.to_string());
+    }
+    #[cfg(not(windows))]
+    {
+        if cfg!(target_os = "macos") {
+            macos_keychain_delete(service, account)
+        } else if cfg!(target_os = "linux") {
+            linux_secret_tool_delete(service, account)
+        } else {
+            Err("keychain access is not supported on this platform".to_string())
+        }
     }
 }
 
@@ -2285,6 +2391,79 @@ fn redact_log_message(message: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keychain_capabilities_and_unsupported_operations_remain_explicit() {
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            let host = Object::new(ctx.clone()).unwrap();
+            inject_keychain(&ctx, &host, "credential-fixture").unwrap();
+            ctx.globals().set("host", host).unwrap();
+            let native: bool = ctx.eval("host.keychain.capabilities.windowsExactTarget").unwrap();
+            assert_eq!(native, cfg!(windows));
+            let internet: bool = ctx.eval("host.keychain.capabilities.internetPassword").unwrap();
+            assert_eq!(internet, cfg!(target_os = "macos"));
+            #[cfg(not(windows))]
+            assert!(ctx.eval::<bool, _>(r#"
+                (() => { try { host.keychain.readWindowsGenericPassword('unused-target', null, 'utf8'); }
+                catch (error) { return String(error).includes('credential-unsupported'); } return false; })()
+            "#).unwrap());
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn javascript_keychain_contract_roundtrips_disposable_native_credentials() {
+        use usagestat_core::credentials::{self, CredentialError, Encoding};
+        let target = format!(
+            "usagestat-native-js-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        assert!(matches!(
+            credentials::read(&target, None, Encoding::Utf8),
+            Err(CredentialError::Missing)
+        ));
+        struct Cleanup(String);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = credentials::delete(&self.0, None);
+            }
+        }
+        let _cleanup = Cleanup(target.clone());
+        let runtime = rquickjs::Runtime::new().unwrap();
+        let context = rquickjs::Context::full(&runtime).unwrap();
+        context.with(|ctx| {
+            let host = Object::new(ctx.clone()).unwrap();
+            inject_keychain(&ctx, &host, "credential-fixture").unwrap();
+            ctx.globals().set("host", host).unwrap();
+            ctx.globals().set("target", target).unwrap();
+            let passed: bool = ctx.eval(r#"
+                (() => {
+                  const k = host.keychain;
+                  const check = value => { if (!value) throw new Error('credential fixture mismatch'); };
+                  k.writeGenericPasswordForCurrentUser(target, 'synthetic 使用');
+                  check(k.readGenericPasswordForCurrentUser(target) === 'synthetic 使用');
+                  const item = JSON.parse(k.readGenericPasswordItem(target));
+                  check(item.account.length > 0 && item.password === 'synthetic 使用');
+                  try { k.writeGenericPasswordForAccount(target, 'unrelated-fixture-account', 'wrong'); return false; }
+                  catch (error) { check(String(error).includes('credential-account-mismatch')); }
+                  check(k.readGenericPassword(target) === 'synthetic 使用');
+                  k.writeWindowsGenericPassword(target, item.account, '{"refresh":"synthetic café"}', 'utf16le');
+                  check(k.readWindowsGenericPassword(target, item.account, 'utf16le') === '{"refresh":"synthetic café"}');
+                  k.deleteGenericPassword(target, item.account);
+                  try { k.readGenericPassword(target); return false; }
+                  catch (error) { check(String(error).includes('credential-missing')); }
+                  return true;
+                })()
+            "#).unwrap();
+            assert!(passed);
+        });
+    }
 
     #[test]
     fn capped_output_decode_drops_incomplete_trailing_utf8() {
