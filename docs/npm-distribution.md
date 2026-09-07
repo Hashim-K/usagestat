@@ -43,6 +43,12 @@ Python fixture's command-line quoting; the corrected fixture passed against the
 same package bytes. Login/reboot, real-account coexistence, running/interrupted
 version upgrades and first public-registry publication remain pending in #21/#20.
 
+[Run 34080463278](https://github.com/hashimkarim/usagestat/actions/runs/34080463278)
+also passed all five archive builds, aggregate verification and all five npm
+installations at `68b5e20`. This regenerated the packages with runtime-only
+resources, excluding provider tests while retaining Droid's shared Factory entry.
+Publication jobs were skipped; no registry or GitHub release was created.
+
 The publication helper checks every staged/existing version before uploading,
 publishes and verifies platforms before the main package, and rejects conflicting
 published bytes. Retries skip only matching integrity and metadata. It sets
