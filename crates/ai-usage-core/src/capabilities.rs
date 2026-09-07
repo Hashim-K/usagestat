@@ -121,7 +121,19 @@ fn for_platform(
         ),
         (
             "browser.automaticImport",
-            Feature::new(os == "linux", "unverified"),
+            Feature::new(native, "native-fixtures-pending"),
+        ),
+        (
+            "browser.chromiumCbcImport",
+            Feature::new(matches!(os, "linux" | "macos"), "native-fixtures-pending"),
+        ),
+        (
+            "browser.windowsDpapiImport",
+            Feature::new(os == "windows", "native-fixtures-pending"),
+        ),
+        (
+            "browser.appBoundImport",
+            Feature { reason_code: Some("browser-app-bound-unsupported"), ..Feature::new(false, "unsupported-format") },
         ),
         (
             "browser.manualCredentials",
@@ -214,10 +226,12 @@ mod tests {
                 value.features["credentials.internetPassword"].implemented,
                 os == "macos"
             );
-            assert_eq!(
-                value.features["browser.automaticImport"].implemented,
-                os == "linux"
-            );
+            assert!(value.features["browser.automaticImport"].implemented);
+            assert_eq!(value.features["browser.automaticImport"].runtime, "not-checked");
+            assert_eq!(value.features["browser.windowsDpapiImport"].implemented, os == "windows");
+            assert_eq!(value.features["browser.chromiumCbcImport"].implemented, os != "windows");
+            assert!(!value.features["browser.appBoundImport"].implemented);
+            assert_eq!(value.features["browser.appBoundImport"].reason_code, Some("browser-app-bound-unsupported"));
             assert_eq!(value.profile, "usagestat-dev");
         }
         assert!(

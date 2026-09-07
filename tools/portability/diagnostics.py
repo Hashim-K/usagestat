@@ -63,7 +63,7 @@ def check(bin_dir: Path, temp_dir: Path | None = None) -> dict:
         assert report["service"]["code"] in ("service-stopped", "service-manager-unavailable")
         if os.name == "nt" or platform.system() == "Darwin":
             assert "systemctl" not in run(cli, ["doctor"], root, env)
-            assert codes["browser.automaticImport"] == "unsupported"
+            assert codes["browser.automaticImport"] == "not-checked"
         result["checks"].append("missing-config-binary-resources-helpers-read-only")
 
         config.write_text('providers = "' + sentinel + '"', encoding="utf-8")

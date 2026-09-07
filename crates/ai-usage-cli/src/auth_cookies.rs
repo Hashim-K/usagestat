@@ -1,20 +1,17 @@
-use aes::Aes128;
-use cbc::cipher::{BlockDecryptMut, KeyIvInit, block_padding::Pkcs7};
-use pbkdf2::pbkdf2_hmac;
+//! Scoped Chromium cookie import. Read-only SQLite transactions provide a live
+//! snapshot without copying browser credentials to temporary databases.
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
-use sha1::Sha1;
 use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
-use usagestat_core::process;
+use std::path::PathBuf;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-type Aes128CbcDec = cbc::Decryptor<Aes128>;
+mod crypto;
+mod profiles;
+#[cfg(test)]
+mod tests;
 
-const SESSION_NOT_FOUND: &str = "SESSION_NOT_FOUND";
-
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CookieImportResult {
     pub provider_id: String,
@@ -32,393 +29,345 @@ pub struct CookieImportError {
     pub error: String,
     pub message: String,
 }
-
-#[derive(Debug)]
-struct BrowserCandidate {
-    id: &'static str,
-    config_dir: PathBuf,
-    secret_app_ids: &'static [&'static str],
+type Result<T> = std::result::Result<T, CookieImportError>;
+fn error(code: &str, message: &str) -> CookieImportError {
+    CookieImportError {
+        error: code.into(),
+        message: message.into(),
+    }
 }
 
-#[derive(Debug)]
-struct ProfileCandidate {
-    browser_id: &'static str,
-    profile: String,
-    cookies_db: PathBuf,
-    secret_app_ids: &'static [&'static str],
+#[derive(Default)]
+pub struct ImportOptions {
+    pub browser: Option<String>,
+    pub profile: Option<String>,
+    pub user_data_dir: Option<PathBuf>,
+}
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Platform {
+    Linux,
+    Macos,
+    Windows,
+}
+impl Platform {
+    fn current() -> Result<Self> {
+        if cfg!(target_os = "linux") {
+            Ok(Self::Linux)
+        } else if cfg!(target_os = "macos") {
+            Ok(Self::Macos)
+        } else if cfg!(windows) {
+            Ok(Self::Windows)
+        } else {
+            Err(error(
+                "PLATFORM_UNSUPPORTED",
+                "Use provider-specific manual credentials on this platform.",
+            ))
+        }
+    }
 }
 
-#[derive(Debug, Clone)]
-struct CookieRecord {
+#[derive(Clone)]
+struct Profile {
+    browser: &'static str,
+    name: String,
+    db: PathBuf,
+    #[cfg_attr(not(windows), allow(dead_code))]
+    data_dir: PathBuf,
+    platform: Platform,
+    secret_app_ids: &'static [&'static str],
+    mac_keychain: Option<(&'static str, &'static str)>,
+}
+// Deliberately no Debug: records include authentication material.
+struct Cookie {
     name: String,
     value: String,
+    encrypted: Vec<u8>,
     domain: String,
     path: String,
-    expires_utc: i64,
-    secure: bool,
-    http_only: bool,
 }
-
-struct TempCookieDb {
-    dir: PathBuf,
-    db: PathBuf,
-}
-
-impl Drop for TempCookieDb {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.dir);
-    }
-}
-
-/// Extract the registrable hostname from a URL (e.g. "https://claude.ai/foo" → "claude.ai").
-fn host_from_url(url: &str) -> Option<String> {
-    let after_scheme = url
-        .strip_prefix("https://")
-        .or_else(|| url.strip_prefix("http://"))?;
-    let host = after_scheme.split('/').next()?;
-    let host = host.split(':').next()?; // strip port if any
-    if host.is_empty() {
-        None
-    } else {
-        Some(host.to_lowercase())
-    }
+struct Snapshot {
+    version: u32,
+    cookies: Vec<Cookie>,
 }
 
 pub fn import_cookies(
     provider_id: &str,
     web_url: &str,
-) -> Result<CookieImportResult, CookieImportError> {
-    if !cfg!(target_os = "linux") {
-        return Err(CookieImportError {
-            error: "PLATFORM_UNSUPPORTED".to_string(),
-            message: "Automatic browser import is not implemented on this platform yet. Supply provider-specific manual credentials instead.".to_string(),
-        });
+    options: &ImportOptions,
+) -> Result<CookieImportResult> {
+    let platform = Platform::current()?;
+    let url = reqwest::Url::parse(web_url)
+        .map_err(|_| error("INVALID_WEB_URL", "Provider web URL is invalid."))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return Err(error(
+            "INVALID_WEB_URL",
+            "Provider web URL must be HTTP(S), with a host and no credentials.",
+        ));
     }
-    let Some(host) = host_from_url(web_url) else {
-        return Err(CookieImportError {
-            error: "INVALID_WEB_URL".to_string(),
-            message: format!("Provider '{provider_id}' has an invalid webUrl: {web_url}"),
-        });
-    };
-
-    for profile in discover_profiles() {
-        let Ok(cookies) = read_profile_cookies(&profile, &host) else {
-            continue;
-        };
-        if cookies.is_empty() {
-            continue;
-        }
-        let cookie_header = build_cookie_header(cookies, &host);
-        if cookie_header.is_empty() {
-            continue;
-        }
-        return Ok(CookieImportResult {
-            provider_id: provider_id.to_string(),
-            cookie_header,
-            source: profile.browser_id.to_string(),
-            profile: profile.profile,
-            requires_full_curl_on_challenge: None,
-            full_curl_instructions: None,
-        });
-    }
-
-    Err(CookieImportError {
-        error: SESSION_NOT_FOUND.to_string(),
-        message: format!("No browser cookies found for {host}."),
+    let profiles = profiles::discover(platform, options)?;
+    let mut decoder = crypto::Decoder::default();
+    import_selected(provider_id, &url, profiles, |profile, cookie, version| {
+        decoder.decode(profile, cookie, version)
     })
 }
 
-fn discover_profiles() -> Vec<ProfileCandidate> {
-    let Some(config_home) = dirs::config_dir() else {
-        return Vec::new();
-    };
-    let browsers = [
-        BrowserCandidate {
-            id: "chrome",
-            config_dir: config_home.join("google-chrome"),
-            secret_app_ids: &["chrome", "google-chrome"],
-        },
-        BrowserCandidate {
-            id: "brave",
-            config_dir: config_home.join("BraveSoftware").join("Brave-Browser"),
-            secret_app_ids: &["brave", "brave-browser"],
-        },
-        BrowserCandidate {
-            id: "chromium",
-            config_dir: config_home.join("chromium"),
-            secret_app_ids: &["chromium"],
-        },
-    ];
-
-    let mut profiles = Vec::new();
-    for browser in browsers {
-        if !browser.config_dir.is_dir() {
-            continue;
-        }
-        let mut dirs = vec![browser.config_dir.join("Default")];
-        if let Ok(entries) = fs::read_dir(&browser.config_dir) {
-            let mut profile_dirs: Vec<PathBuf> = entries
-                .flatten()
-                .map(|entry| entry.path())
-                .filter(|path| {
-                    path.file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.starts_with("Profile "))
-                })
-                .collect();
-            profile_dirs.sort();
-            dirs.extend(profile_dirs);
-        }
-
-        for dir in dirs {
-            let cookies_db = if dir.join("Network").join("Cookies").is_file() {
-                dir.join("Network").join("Cookies")
-            } else if dir.join("Cookies").is_file() {
-                dir.join("Cookies")
-            } else {
-                continue;
-            };
-            let profile = dir
-                .file_name()
-                .and_then(|name| name.to_str())
-                .unwrap_or("Default")
-                .to_string();
-            profiles.push(ProfileCandidate {
-                browser_id: browser.id,
-                profile,
-                cookies_db,
-                secret_app_ids: browser.secret_app_ids,
-            });
+fn import_selected(
+    provider_id: &str,
+    url: &reqwest::Url,
+    profiles: Vec<Profile>,
+    mut decrypt: impl FnMut(&Profile, &Cookie, u32) -> Result<String>,
+) -> Result<CookieImportResult> {
+    let mut matching = Vec::new();
+    let mut read_error = None;
+    for profile in profiles {
+        match read_snapshot(&profile, url, chromium_now()) {
+            Ok(snapshot) if !snapshot.cookies.is_empty() => matching.push((profile, snapshot)),
+            Ok(_) => {}
+            Err(err) => {
+                read_error.get_or_insert(err);
+            }
         }
     }
-    profiles
+    if let Some(err) = read_error {
+        return Err(err);
+    }
+    // Choose before decrypting: no Keychain prompts or credential combinations
+    // from other browser accounts, and no fallback after a selected-store error.
+    if matching.len() > 1 {
+        return Err(error(
+            "AMBIGUOUS_PROFILE",
+            "More than one browser profile has matching cookies. Select --browser and --profile, or an explicit --user-data-dir.",
+        ));
+    }
+    let Some((profile, snapshot)) = matching.pop() else {
+        return Err(error(
+            "SESSION_NOT_FOUND",
+            "No unexpired cookies match this provider URL. Sign in or use provider-specific manual credentials.",
+        ));
+    };
+    // Reject known unavailable formats before requesting any native key.
+    for cookie in &snapshot.cookies {
+        crypto::validate_format(profile.platform, cookie)?;
+    }
+    let mut cookies = Vec::new();
+    for mut cookie in snapshot.cookies {
+        cookie.value = decrypt(&profile, &cookie, snapshot.version)?;
+        if !valid_name(&cookie.name) || !valid_value(&cookie.value) {
+            return Err(error(
+                "COOKIE_DECRYPT_FAILED",
+                "Cookie data is malformed; use provider-specific manual credentials.",
+            ));
+        }
+        cookies.push(cookie);
+    }
+    let header = build_header(cookies, url.host_str().unwrap());
+    if header.is_empty() {
+        return Err(error(
+            "SESSION_NOT_FOUND",
+            "No usable cookies match this provider URL.",
+        ));
+    }
+    Ok(CookieImportResult {
+        provider_id: provider_id.into(),
+        cookie_header: header,
+        source: profile.browser.into(),
+        profile: profile.name,
+        requires_full_curl_on_challenge: None,
+        full_curl_instructions: None,
+    })
 }
 
-fn read_profile_cookies(
-    profile: &ProfileCandidate,
-    host: &str,
-) -> Result<Vec<CookieRecord>, String> {
-    let temp = copy_cookie_db(&profile.cookies_db)?;
+fn chromium_now() -> i64 {
+    const EPOCH: i64 = 11_644_473_600_000_000;
+    EPOCH
+        + SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros()
+            .min(i64::MAX as u128 - EPOCH as u128) as i64
+}
+fn domain_matches(domain: &str, host: &str) -> bool {
+    if let Some(domain) = domain.strip_prefix('.') {
+        !domain.is_empty()
+            && (host.eq_ignore_ascii_case(domain)
+                || host
+                    .to_ascii_lowercase()
+                    .ends_with(&format!(".{}", domain.to_ascii_lowercase())))
+    } else {
+        host.eq_ignore_ascii_case(domain)
+    }
+}
+fn path_matches(cookie: &str, request: &str) -> bool {
+    cookie.starts_with('/')
+        && (cookie == request
+            || request
+                .strip_prefix(cookie)
+                .is_some_and(|rest| cookie.ends_with('/') || rest.starts_with('/')))
+}
+fn valid_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 4096
+        && name
+            .bytes()
+            .all(|b| b.is_ascii_graphic() && !b"()<>@,;:\\\"/[]?={}".contains(&b))
+}
+fn valid_value(value: &str) -> bool {
+    value.len() <= 64 * 1024
+        && value.bytes().all(|b| {
+            b == 0x21
+                || (0x23..=0x2b).contains(&b)
+                || (0x2d..=0x3a).contains(&b)
+                || (0x3c..=0x5b).contains(&b)
+                || (0x5d..=0x7e).contains(&b)
+        })
+}
+
+fn read_snapshot(profile: &Profile, url: &reqwest::Url, now: i64) -> Result<Snapshot> {
+    let db_error = || {
+        error(
+            "COOKIE_DB_UNAVAILABLE",
+            "Browser cookie database is locked or inaccessible. Close the browser and retry, or use manual credentials.",
+        )
+    };
+    let schema_error = || {
+        error(
+            "COOKIE_SCHEMA_UNSUPPORTED",
+            "Browser cookie schema is unsupported. Use provider-specific manual credentials.",
+        )
+    };
+    let query_error = |err: rusqlite::Error| match err.sqlite_error_code() {
+        Some(
+            rusqlite::ErrorCode::DatabaseBusy
+            | rusqlite::ErrorCode::DatabaseLocked
+            | rusqlite::ErrorCode::CannotOpen
+            | rusqlite::ErrorCode::SystemIoFailure
+            | rusqlite::ErrorCode::PermissionDenied,
+        ) => db_error(),
+        _ => schema_error(),
+    };
     let conn = Connection::open_with_flags(
-        &temp.db,
+        &profile.db,
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .map_err(|error| format!("open cookie db: {error}"))?;
-
-    let mut stmt = conn
-        .prepare(
-            "SELECT host_key, name, value, encrypted_value, path, expires_utc, is_secure, is_httponly
-             FROM cookies
-             WHERE host_key LIKE ?1",
-        )
-        .map_err(|error| format!("prepare cookie query: {error}"))?;
-    let domain_pattern = format!("%{host}");
-    let rows = stmt
-        .query_map([&domain_pattern], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, Vec<u8>>(3)?,
-                row.get::<_, String>(4)?,
-                row.get::<_, i64>(5)?,
-                row.get::<_, i64>(6)? != 0,
-                row.get::<_, i64>(7)? != 0,
-            ))
+    .map_err(|_| db_error())?;
+    conn.busy_timeout(Duration::from_millis(250))
+        .map_err(|_| db_error())?;
+    conn.execute_batch("PRAGMA query_only=ON; BEGIN")
+        .map_err(|_| db_error())?;
+    let version: u32 = conn
+        .query_row("SELECT value FROM meta WHERE key='version'", [], |r| {
+            r.get::<_, String>(0)?
+                .parse()
+                .map_err(|_| rusqlite::Error::InvalidQuery)
         })
-        .map_err(|error| format!("query cookies: {error}"))?;
-
-    let passwords = browser_passwords(profile.secret_app_ids);
-    let mut cookies = Vec::new();
-    for row in rows {
-        let (domain, name, value, encrypted_value, path, expires_utc, secure, http_only) =
-            row.map_err(|error| format!("read cookie row: {error}"))?;
-        let Some(cookie_value) = cookie_value(&value, &encrypted_value, &passwords) else {
-            continue;
-        };
-        if cookie_value.is_empty() || name.is_empty() {
-            continue;
-        }
-        cookies.push(CookieRecord {
-            name,
-            value: cookie_value,
-            domain,
-            path,
-            expires_utc,
-            secure,
-            http_only,
-        });
+        .map_err(query_error)?;
+    if !(1..=24).contains(&version) {
+        return Err(schema_error());
     }
-    Ok(cookies)
-}
-
-fn copy_cookie_db(path: &Path) -> Result<TempCookieDb, String> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_nanos())
-        .unwrap_or(0);
-    let dir =
-        std::env::temp_dir().join(format!("usagestat-cookies-{}-{stamp}", std::process::id()));
-    fs::create_dir_all(&dir).map_err(|error| format!("create temp dir: {error}"))?;
-    let db = dir.join("Cookies");
-    fs::copy(path, &db).map_err(|error| format!("copy cookie db: {error}"))?;
-
-    for suffix in ["-wal", "-shm"] {
-        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
-            continue;
-        };
-        let sidecar = path.with_file_name(format!("{file_name}{suffix}"));
-        if sidecar.is_file() {
-            let target = dir.join(format!("Cookies{suffix}"));
-            let _ = fs::copy(sidecar, target);
-        }
-    }
-
-    Ok(TempCookieDb { dir, db })
-}
-
-fn browser_passwords(app_ids: &[&str]) -> Vec<String> {
-    let mut passwords = Vec::new();
-    for app_id in app_ids {
-        if let Some(secret) = secret_tool_lookup(app_id) {
-            passwords.push(secret);
-        }
-    }
-    passwords.push("peanuts".to_string());
-    passwords
-}
-
-fn secret_tool_lookup(app_id: &str) -> Option<String> {
-    let mut command = process::command("secret-tool").ok()?;
-    command.args(["lookup", "application", app_id]);
-    let output = process::run(command, std::time::Duration::from_secs(30), 64 * 1024).ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let secret = String::from_utf8(output.stdout).ok()?.trim().to_string();
-    if secret.is_empty() {
-        None
-    } else {
-        Some(secret)
-    }
-}
-
-fn cookie_value(value: &str, encrypted_value: &[u8], passwords: &[String]) -> Option<String> {
-    if !value.is_empty() {
-        return Some(value.to_string());
-    }
-    if encrypted_value.is_empty() {
-        return None;
-    }
-    for password in passwords {
-        if let Some(decrypted) = decrypt_chromium_cookie(encrypted_value, password) {
-            return Some(decrypted);
-        }
-    }
-    None
-}
-
-fn decrypt_chromium_cookie(encrypted_value: &[u8], password: &str) -> Option<String> {
-    if encrypted_value.starts_with(b"v10") || encrypted_value.starts_with(b"v11") {
-        decrypt_aes128_cbc(&encrypted_value[3..], password)
-    } else {
-        String::from_utf8(encrypted_value.to_vec()).ok()
-    }
-}
-
-fn decrypt_aes128_cbc(payload: &[u8], password: &str) -> Option<String> {
-    let mut key = [0_u8; 16];
-    pbkdf2_hmac::<Sha1>(password.as_bytes(), b"saltysalt", 1, &mut key);
-    let iv = [b' '; 16];
-    let decrypted = Aes128CbcDec::new(&key.into(), &iv.into())
-        .decrypt_padded_vec_mut::<Pkcs7>(payload)
-        .ok()?;
-    clean_decrypted_cookie_value(&decrypted)
-}
-
-fn clean_decrypted_cookie_value(decrypted: &[u8]) -> Option<String> {
-    let mut candidates: Vec<&[u8]> = Vec::new();
-    if let Some(jwt_start) = decrypted.windows(3).position(|window| window == b"eyJ") {
-        if jwt_start < 48 {
-            candidates.push(&decrypted[jwt_start..]);
-        }
-    }
-    for offset in [32, 28, 0] {
-        if decrypted.len() > offset {
-            candidates.push(&decrypted[offset..]);
-        }
-    }
-
-    candidates.into_iter().find_map(clean_cookie_candidate)
-}
-
-fn clean_cookie_candidate(candidate: &[u8]) -> Option<String> {
-    let mut value = String::from_utf8_lossy(candidate)
-        .chars()
-        .filter(|character| *character != '\r' && *character != '\n' && *character != '\t')
-        .collect::<String>();
-
-    value = value
-        .chars()
-        .filter(|character| character.is_ascii() && !character.is_ascii_control())
-        .collect();
-
-    let value = value
-        .trim_matches(|character: char| !is_cookie_value_character(character))
-        .to_string();
-
-    if value.is_empty() {
-        return None;
-    }
-
-    let sample_len = value.len().min(10);
-    if !value.as_bytes()[..sample_len]
-        .iter()
-        .all(|byte| byte.is_ascii_graphic() || *byte == b' ')
+    let columns = conn
+        .prepare("PRAGMA table_info(cookies)")
+        .map_err(|_| schema_error())?
+        .query_map([], |r| r.get::<_, String>(1))
+        .map_err(|_| schema_error())?
+        .collect::<std::result::Result<HashSet<_>, _>>()
+        .map_err(|_| schema_error())?;
+    if ![
+        "host_key",
+        "name",
+        "value",
+        "encrypted_value",
+        "path",
+        "expires_utc",
+        "is_secure",
+    ]
+    .iter()
+    .all(|column| columns.contains(*column))
     {
-        return None;
+        return Err(schema_error());
     }
-
-    Some(value)
+    // Host/domain matching is exact below; SQL narrows the read without suffix
+    // wildcards that would accidentally include an unrelated sibling domain.
+    let host = url.host_str().unwrap();
+    let mut domains = vec![host.to_owned(), format!(".{host}")];
+    let mut parent = host;
+    while let Some((_, suffix)) = parent.split_once('.') {
+        domains.push(format!(".{suffix}"));
+        parent = suffix;
+    }
+    let placeholders = vec!["?"; domains.len()].join(",");
+    let partition = if columns.contains("top_frame_site_key") {
+        "AND COALESCE(top_frame_site_key,'')=''"
+    } else {
+        ""
+    };
+    let sql = format!(
+        "SELECT host_key,name,value,encrypted_value,path,expires_utc,is_secure FROM cookies WHERE lower(host_key) IN ({placeholders}) {partition} LIMIT 4097"
+    );
+    let mut stmt = conn.prepare(&sql).map_err(|_| schema_error())?;
+    let mut rows = stmt
+        .query(rusqlite::params_from_iter(domains))
+        .map_err(|_| db_error())?;
+    let mut cookies = Vec::new();
+    let mut bytes = 0;
+    let mut count = 0;
+    while let Some(row) = rows.next().map_err(|_| db_error())? {
+        count += 1;
+        let cookie = Cookie {
+            domain: row.get(0).map_err(|_| schema_error())?,
+            name: row.get(1).map_err(|_| schema_error())?,
+            value: row.get(2).map_err(|_| schema_error())?,
+            encrypted: row.get(3).map_err(|_| schema_error())?,
+            path: row.get(4).map_err(|_| schema_error())?,
+        };
+        let expiry: i64 = row.get(5).map_err(|_| schema_error())?;
+        let secure: bool = row.get(6).map_err(|_| schema_error())?;
+        bytes += cookie.encrypted.len() + cookie.value.len() + cookie.name.len();
+        if count > 4096 || bytes > 4 * 1024 * 1024 {
+            return Err(error(
+                "COOKIE_DB_UNAVAILABLE",
+                "Matching cookie data exceeds import limits.",
+            ));
+        }
+        if !domain_matches(&cookie.domain, host)
+            || !path_matches(&cookie.path, url.path())
+            || (secure && url.scheme() != "https")
+            || (expiry != 0 && expiry <= now)
+        {
+            continue;
+        }
+        if cookie.value.is_empty() && cookie.encrypted.is_empty() {
+            continue;
+        }
+        if !valid_name(&cookie.name) || cookie.encrypted.len() > 64 * 1024 {
+            return Err(error(
+                "COOKIE_DECRYPT_FAILED",
+                "Matching cookie data is malformed.",
+            ));
+        }
+        cookies.push(cookie);
+    }
+    Ok(Snapshot { version, cookies })
 }
-
-fn is_cookie_value_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || "-_.~%|=/+".contains(character)
-}
-
-fn build_cookie_header(cookies: Vec<CookieRecord>, host: &str) -> String {
-    let mut seen = HashSet::new();
-    let mut ordered = cookies;
-    ordered.sort_by(|a, b| {
-        cookie_rank(b, host)
-            .cmp(&cookie_rank(a, host))
+fn build_header(mut cookies: Vec<Cookie>, host: &str) -> String {
+    cookies.sort_by(|a, b| {
+        b.path
+            .len()
+            .cmp(&a.path.len())
+            .then_with(|| {
+                (b.domain.trim_start_matches('.') == host)
+                    .cmp(&(a.domain.trim_start_matches('.') == host))
+            })
             .then_with(|| a.name.cmp(&b.name))
     });
-    ordered
+    let mut seen = HashSet::new();
+    cookies
         .into_iter()
-        .filter(|cookie| seen.insert(cookie.name.clone()))
-        .map(|cookie| format!("{}={}", cookie.name, cookie.value))
+        .filter(|c| seen.insert(c.name.clone()))
+        .map(|c| format!("{}={}", c.name, c.value))
         .collect::<Vec<_>>()
         .join("; ")
-}
-
-fn cookie_rank(cookie: &CookieRecord, host: &str) -> i32 {
-    let mut rank = 0;
-    // Cookies on the exact host rank higher than subdomain cookies.
-    if cookie.domain.trim_start_matches('.') == host {
-        rank += 10;
-    }
-    if cookie.secure {
-        rank += 2;
-    }
-    if cookie.http_only {
-        rank += 2;
-    }
-    if cookie.path == "/" {
-        rank += 1;
-    }
-    if cookie.expires_utc == 0 {
-        rank += 1;
-    }
-    rank
 }

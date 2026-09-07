@@ -40,7 +40,7 @@ def check(cli: Path) -> dict:
             if pid: request['pid'] = pid
             script = '''globalThis.__usagestat_plugin = {probe: function(ctx) {
               var report = ctx.host.ls.discoverStatus(REQUEST);
-              if (report.status !== EXPECTED) throw 'Unexpected discovery state: ' + report.status;
+              if (report.status !== EXPECTED) throw 'Unexpected discovery state: ' + report.status + ' (' + report.reasonCode + ')';
               if (report.result) {
                 var response = ctx.host.http.request({url: 'http://127.0.0.1:' + report.result.ports[0],
                   method: 'GET', headers: {'x-fixture-token': report.result.csrf}, timeoutMs: 2000});

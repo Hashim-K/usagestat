@@ -205,13 +205,11 @@
       timeoutMs: 15000,
     })
 
-    if (ctx.util.isAuthStatus(resp.status)) throw "T3 Chat session cookie is invalid or expired."
-    if (resp.status < 200 || resp.status >= 300) {
-      if (isVercelChallenge(resp)) {
-        throw "T3 Chat returned a Vercel security challenge. Paste the full browser cURL request into the Cookie header field, not just the Cookie header. Run `usagestat auth curl --provider t3chat` for steps."
-      }
-      throw "T3 Chat API error (HTTP " + resp.status + ")."
+    if ((resp.status < 200 || resp.status >= 300) && isVercelChallenge(resp)) {
+      throw "T3 Chat returned a Vercel security challenge. Paste the full browser cURL request into the Cookie header field. Run `usagestat auth curl --provider t3chat` for steps."
     }
+    if (ctx.util.isAuthStatus(resp.status)) throw "T3 Chat session cookie is invalid or expired."
+    if (resp.status < 200 || resp.status >= 300) throw "T3 Chat API error (HTTP " + resp.status + ")."
 
     const data = parseCustomerData(resp.bodyText)
     const lines = []

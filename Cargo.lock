@@ -2944,7 +2944,9 @@ name = "usagestat-cli"
 version = "1.0.3"
 dependencies = [
  "aes",
+ "aes-gcm",
  "anyhow",
+ "base64",
  "cbc",
  "chrono",
  "clap",
@@ -2960,7 +2962,9 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2 0.10.9",
  "tabled",
+ "tempfile",
  "usagestat-core",
  "usagestat-plugins",
  "windows",

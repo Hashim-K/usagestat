@@ -316,6 +316,15 @@ enum AuthCommand {
         /// Provider whose browser cookies should be imported.
         #[arg(long)]
         provider: String,
+        /// Browser family to import from.
+        #[arg(long, value_parser = ["chrome", "brave", "chromium"])]
+        browser: Option<String>,
+        /// Browser profile directory, such as Default or Profile 1.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Absolute browser user-data directory (requires --browser).
+        #[arg(long, requires = "browser")]
+        user_data_dir: Option<PathBuf>,
         /// Output format. Defaults to text.
         #[arg(long, value_enum, default_value_t = OutputFormat::Text)]
         format: OutputFormat,
@@ -633,11 +642,12 @@ fn run_cli() -> Result<()> {
                 },
         } => run_cache_clear(snapshots, history, all, cookies, cost, provider, json),
         Command::Auth {
-            command: AuthCommand::ImportCookies { provider, format },
+            command: AuthCommand::ImportCookies { provider, format, browser, profile, user_data_dir },
         } => run_auth_import_cookies(
             &providers,
             provider,
             json || matches!(format, OutputFormat::Json),
+            auth_cookies::ImportOptions { browser, profile, user_data_dir },
         ),
         Command::Auth {
             command: AuthCommand::Curl { provider, format },
@@ -1852,6 +1862,7 @@ fn run_auth_import_cookies(
     providers: &[LoadedProvider],
     provider: String,
     json: bool,
+    options: auth_cookies::ImportOptions,
 ) -> Result<()> {
     let matched = providers
         .iter()
@@ -1874,7 +1885,7 @@ fn run_auth_import_cookies(
         }
     };
 
-    let result = auth_cookies::import_cookies(&provider, &web_url);
+    let result = auth_cookies::import_cookies(&provider, &web_url, &options);
     match result {
         Ok(mut imported) => {
             if imported.provider_id.eq_ignore_ascii_case("t3chat") {
