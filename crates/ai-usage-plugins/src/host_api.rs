@@ -247,6 +247,7 @@ pub fn inject<'js>(
     inject_log(ctx, &host, plugin_id)?;
     inject_env(ctx, &host)?;
     inject_fs(ctx, &host)?;
+    inject_codex(ctx, &host)?;
     inject_keychain(ctx, &host, plugin_id)?;
     inject_ls(ctx, &host)?;
     inject_http(ctx, &host)?;
@@ -468,6 +469,21 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     )?;
 
     host.set("fs", fs_obj)?;
+    Ok(())
+}
+
+fn inject_codex<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
+    let codex = Object::new(ctx.clone())?;
+    codex.set("readAuth", Function::new(ctx.clone(), |inner: Ctx<'_>, explicit: Option<String>| -> rquickjs::Result<String> {
+        let result = crate::codex_auth::read(explicit.as_deref())
+            .and_then(|state| serde_json::to_string(&state).map_err(|_| "credential-malformed: Codex auth cannot be serialized".into()));
+        result.map_err(|error| Exception::throw_message(&inner, &error))
+    })?)?;
+    codex.set("writeAuth", Function::new(ctx.clone(), |inner: Ctx<'_>, explicit: Option<String>, profile_key: String, revision: String, storage: String, value: String| -> rquickjs::Result<()> {
+        crate::codex_auth::write(explicit.as_deref(), &profile_key, &revision, &storage, &value)
+            .map_err(|error| Exception::throw_message(&inner, &error))
+    })?)?;
+    host.set("codex", codex)?;
     Ok(())
 }
 
@@ -1561,7 +1577,7 @@ fn log_keychain_read(plugin_id: &str, service: &str, account: Option<&str>) {
     }
 }
 
-fn platform_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
+pub(crate) fn platform_keychain_read(service: &str, account: Option<&str>) -> Result<String, String> {
     #[cfg(windows)]
     {
         return usagestat_core::credentials::read(
@@ -1616,7 +1632,7 @@ fn platform_keychain_read_internet_password(server: &str) -> Result<KeychainPass
     }
 }
 
-fn platform_keychain_write(
+pub(crate) fn platform_keychain_write(
     service: &str,
     account: Option<&str>,
     value: &str,
@@ -1671,7 +1687,11 @@ fn macos_keychain_read(service: &str, account: Option<&str>) -> Result<String, S
     let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err(command_error(&output));
+        return Err(match output.status.code() {
+            Some(44) => "credential-missing: no item for the selected service and account",
+            Some(51 | 128) => "credential-denied: Keychain access was denied",
+            _ => "credential-unavailable: Keychain is locked or unavailable in this session",
+        }.into());
     }
     non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
         .ok_or_else(|| "empty keychain item".to_string())
@@ -1784,7 +1804,9 @@ fn linux_secret_tool_read(service: &str, account: Option<&str>) -> Result<String
     let output = process::run(command, Duration::from_secs(30), COMMAND_OUTPUT_LIMIT_BYTES)
         .map_err(|error| error.to_string())?;
     if !output.status.success() {
-        return Err(command_error(&output));
+        return Err(if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+            "credential-missing: no item for the selected service and account"
+        } else { "credential-unavailable: Secret Service is locked or unavailable in this session" }.into());
     }
     non_empty_trimmed(&String::from_utf8_lossy(&output.stdout))
         .ok_or_else(|| "secret-tool returned empty secret".to_string())

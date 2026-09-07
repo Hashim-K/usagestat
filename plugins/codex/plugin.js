@@ -138,9 +138,24 @@
     }
   }
 
+  function nativeAuthStorage(ctx) {
+    const settings = (ctx.provider && ctx.provider.settings) || {}
+    return typeof settings.authStorage === "string" ? settings.authStorage : "auto"
+  }
+
+  function loadNativeAuth(ctx) {
+    return JSON.parse(ctx.host.codex.readAuth(nativeAuthStorage(ctx)))
+  }
+
   function saveAuth(ctx, authState) {
     const auth = authState && authState.auth ? authState.auth : null
     if (!auth) return false
+
+    if (authState.source === "native") {
+      if (authState.readOnly) return false
+      ctx.host.codex.writeAuth(nativeAuthStorage(ctx), authState.profileKey, authState.revision, authState.storage, JSON.stringify(auth))
+      return true
+    }
 
     if (authState.source === "file" && authState.authPath) {
       ctx.host.fs.writeText(authState.authPath, JSON.stringify(auth, null, 2))
@@ -214,6 +229,8 @@
       } catch (e) {
         ctx.host.log.warn("auth reload failed for file " + authState.authPath + ": " + String(e))
       }
+    } else if (authState.source === "native") {
+      reloaded = loadNativeAuth(ctx)
     } else if (authState.source === "keychain") {
       reloaded = loadAuthFromKeychain(ctx)
     }
@@ -237,6 +254,9 @@
   }
 
   function refreshToken(ctx, authState) {
+    // Rotating an encrypted store's refresh token without updating that store
+    // would invalidate the CLI session. Let the owning Codex CLI refresh it.
+    if (authState.readOnly) throw ERR_SESSION_EXPIRED
     const auth = authState.auth
     if (!auth.tokens || !auth.tokens.refresh_token) {
       ctx.host.log.warn("refresh skipped: no refresh token")
@@ -946,6 +966,9 @@
   }
 
   function probe(ctx) {
+    if (ctx.host.codex && typeof ctx.host.codex.readAuth === "function") {
+      return probeWithAuthState(ctx, loadNativeAuth(ctx))
+    }
     const fileAuth = loadFileAuthCandidates(ctx)
     let lastAuthFallbackError = null
     for (let i = 0; i < fileAuth.candidates.length; i++) {

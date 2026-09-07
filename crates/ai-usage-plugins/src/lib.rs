@@ -1,4 +1,5 @@
 mod cursor_paths;
+mod codex_auth;
 mod cursor_usage_export;
 mod cursor_usage_logs;
 mod host_api;

@@ -20,6 +20,7 @@ from diagnostics import check as check_diagnostics
 from ide_discovery import check as check_ide_discovery
 from local_usage import check as check_local_usage
 from provider_storage import check as check_provider_storage
+from codex_auth import check as check_codex_auth
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -84,6 +85,7 @@ def main() -> int:
                 report["ide_discovery"] = check_ide_discovery(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 report["local_usage"] = check_local_usage(target_dir / args.target / "debug" / ("usagestatd" + suffix))
                 report["provider_storage"] = check_provider_storage(target_dir / args.target / "debug" / ("usagestat" + suffix))
+                report["codex_auth"] = check_codex_auth(target_dir / args.target / "debug" / ("usagestat" + suffix))
                 if platform.system() == "Darwin":
                     env["USAGESTAT_TEST_DAEMON_BINARY"] = str(target_dir / args.target / "debug" / "usagestatd")
                     command("launchagent-tests", ["cargo", "test", "--locked", "-p", "usagestat-cli",

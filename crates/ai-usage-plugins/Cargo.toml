@@ -9,6 +9,7 @@ name = "usagestat_plugins"
 path = "src/lib.rs"
 
 [dependencies]
+age = { version = "0.12.1", default-features = false }
 usagestat-core = { path = "../ai-usage-core" }
 anyhow.workspace = true
 base64.workspace = true
