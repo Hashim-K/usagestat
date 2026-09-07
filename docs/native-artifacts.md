@@ -39,6 +39,9 @@ The current macOS and Windows artifacts are explicitly unsigned candidates.
 
 `LICENSE` includes the project's license and notices from the locked dependency
 union for all initial native targets, including bundled QuickJS/SQLite notices.
+Exact-version notices omitted from upstream crate archives are vendored under
+`tools/publish/licenses`, with source revisions and SHA-256 checks. The packager
+fails on an unreviewed version or modified text and never downloads license text.
 The source license remains unchanged. Bundled resources retain their exact Git
 bytes on every checkout; generated manifests verify the same resource digest on
 every architecture before release inputs can be aggregated.

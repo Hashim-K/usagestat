@@ -40,6 +40,23 @@ class NativeArtifactTests(unittest.TestCase):
         self.assertEqual(sum(name.endswith('/plugin.json') for name in selected), len(list((ROOT / 'plugins').glob('*/plugin.json'))))
         self.assertFalse(any(name.endswith('.test.js') for name in selected))
 
+    def test_pinned_license_notices_reject_changes_and_unreviewed_versions(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = root / 'tools/publish/licenses'
+            shutil.copytree(ROOT / 'tools/publish/licenses', target)
+            manifest = json.loads((target / 'manifest.json').read_text())
+            for key, entry in manifest.items():
+                name, version = key.rsplit('-', 1)
+                package = dict(name=name, version=version, license=entry['license'], repository=entry['repository'])
+                self.assertTrue(artifacts.pinned_license_notices(root, package))
+                with self.assertRaises(ValueError): artifacts.pinned_license_notices(root, dict(package, version='999.0.0'))
+                with self.assertRaises(ValueError): artifacts.pinned_license_notices(root, dict(package, license='changed'))
+                file = target / entry['files'][0]['path']
+                file.write_bytes(file.read_bytes() + b'changed')
+                with self.assertRaises(ValueError): artifacts.pinned_license_notices(root, package)
+
     def fixture(self, files, executable, windows):
         data = artifacts.archive_bytes(files, executable, windows)
         name = 'fixture.zip' if windows else 'fixture.tar.gz'

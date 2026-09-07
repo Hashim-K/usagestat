@@ -1,0 +1,104 @@
+{
+  "age-0.12.1": {
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/str4d/rage",
+    "revision": "7a854c9c8c02dab2ebea19e02e6693a5730a8b2a",
+    "files": [
+      {
+        "path": "age-0.12.1/LICENSE-MIT",
+        "sha256": "fe56c030c2d8c3404a37fe711cebb27ebea13d0aacf7e3524db4198335ad8cd1",
+        "source": "https://raw.githubusercontent.com/str4d/rage/7a854c9c8c02dab2ebea19e02e6693a5730a8b2a/LICENSE-MIT"
+      },
+      {
+        "path": "age-0.12.1/LICENSE-APACHE",
+        "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+        "source": "https://raw.githubusercontent.com/str4d/rage/7a854c9c8c02dab2ebea19e02e6693a5730a8b2a/LICENSE-APACHE"
+      }
+    ]
+  },
+  "age-core-0.12.0": {
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/str4d/rage",
+    "revision": "f6383f367e9aa514a3b5fbce7feede08a425d647",
+    "files": [
+      {
+        "path": "age-core-0.12.0/LICENSE-MIT",
+        "sha256": "fe56c030c2d8c3404a37fe711cebb27ebea13d0aacf7e3524db4198335ad8cd1",
+        "source": "https://raw.githubusercontent.com/str4d/rage/f6383f367e9aa514a3b5fbce7feede08a425d647/LICENSE-MIT"
+      },
+      {
+        "path": "age-core-0.12.0/LICENSE-APACHE",
+        "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+        "source": "https://raw.githubusercontent.com/str4d/rage/f6383f367e9aa514a3b5fbce7feede08a425d647/LICENSE-APACHE"
+      }
+    ]
+  },
+  "cookie-factory-0.3.3": {
+    "license": "MIT",
+    "repository": "https://github.com/rust-bakery/cookie-factory",
+    "revision": "d36b805dbd7dd65f2df947235c5bcc573afe2c76",
+    "files": [
+      {
+        "path": "cookie-factory-0.3.3/LICENSES/MIT.txt",
+        "sha256": "d09216dc1ea5f273997667935a8d6514d80f00b89fb6954ecc3a43e0a6e360de",
+        "source": "https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/LICENSES/MIT.txt"
+      },
+      {
+        "path": "cookie-factory-0.3.3/dep5",
+        "sha256": "fac95e33eb175ff151cde39e3f7ad52292e6acf83db22bef30d3bfad417a8846",
+        "source": "https://raw.githubusercontent.com/rust-bakery/cookie-factory/d36b805dbd7dd65f2df947235c5bcc573afe2c76/.reuse/dep5"
+      }
+    ]
+  },
+  "fluent-langneg-0.13.1": {
+    "license": "Apache-2.0 OR MIT",
+    "repository": "https://github.com/projectfluent/fluent-langneg-rs",
+    "revision": "7fdc590466ea63ca2367ac10fb1b881fe561f1a8",
+    "files": [
+      {
+        "path": "fluent-langneg-0.13.1/LICENSE-MIT",
+        "sha256": "016fcc02048817d628b04b140c54db290fd9d29a5e8a55b77871194e810716ac",
+        "source": "https://raw.githubusercontent.com/projectfluent/fluent-langneg-rs/7fdc590466ea63ca2367ac10fb1b881fe561f1a8/LICENSE-MIT"
+      },
+      {
+        "path": "fluent-langneg-0.13.1/LICENSE-APACHE",
+        "sha256": "b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1",
+        "source": "https://raw.githubusercontent.com/projectfluent/fluent-langneg-rs/7fdc590466ea63ca2367ac10fb1b881fe561f1a8/LICENSE-APACHE"
+      }
+    ]
+  },
+  "intl_pluralrules-7.0.2": {
+    "license": "Apache-2.0/MIT",
+    "repository": "https://github.com/zbraniecki/pluralrules",
+    "revision": "d0715d5b7cca72e228d6e6c4de154bd30dfdd06a",
+    "files": [
+      {
+        "path": "intl_pluralrules-7.0.2/intl_pluralrules/LICENSE-MIT",
+        "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+        "source": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-MIT"
+      },
+      {
+        "path": "intl_pluralrules-7.0.2/intl_pluralrules/LICENSE-APACHE",
+        "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+        "source": "https://raw.githubusercontent.com/zbraniecki/pluralrules/d0715d5b7cca72e228d6e6c4de154bd30dfdd06a/intl_pluralrules/LICENSE-APACHE"
+      }
+    ]
+  },
+  "io_tee-0.1.1": {
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/TheOnlyMrCat/io_tee",
+    "revision": "8a7adecebf3429cbc58a0368751d1851dfaf58ed",
+    "files": [
+      {
+        "path": "io_tee-0.1.1/README.md",
+        "sha256": "0ba20a4b5d8188a85014c5f6d52b5407aec2077986c05f6ba686f9899b767b95",
+        "source": "https://raw.githubusercontent.com/TheOnlyMrCat/io_tee/8a7adecebf3429cbc58a0368751d1851dfaf58ed/README.md"
+      },
+      {
+        "path": "io_tee-0.1.1/LICENSE-APACHE",
+        "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+        "source": "https://www.apache.org/licenses/LICENSE-2.0.txt"
+      }
+    ]
+  }
+}

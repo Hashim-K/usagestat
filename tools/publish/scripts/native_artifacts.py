@@ -152,6 +152,31 @@ def runtime_resource_names(root: Path, tracked: list[str]) -> list[str]:
             and (PurePosixPath(item).suffix.lower() in (".svg", ".png", ".jpg", ".webp") or PurePosixPath(item).name in ("LICENSE", "NOTICE")))
     return sorted(selected)
 
+def pinned_license_notices(root: Path, package: dict) -> list[str]:
+    """Crate archives sometimes omit licenses; use reviewed exact-version copies."""
+    directory = root / "tools/publish/licenses"
+    entries = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    key = f"{package['name']}-{package['version']}"
+    entry = entries.get(key)
+    if not entry or entry["license"] != package.get("license") or entry["repository"] != package.get("repository", "").removesuffix(".git"):
+        raise ValueError(f"Missing reviewed dependency license text: {key}")
+    if not entry.get("files"):
+        raise ValueError(f"Empty dependency license entry: {key}")
+    sections = []
+    for item in entry["files"]:
+        relative = PurePosixPath(item["path"])
+        if relative.is_absolute() or ".." in relative.parts or "\\" in item["path"] or ":" in item["path"]:
+            raise ValueError("Unsafe dependency license path")
+        path = directory / relative
+        if path.is_symlink() or not path.is_file() or not path.resolve().is_relative_to(directory.resolve()):
+            raise ValueError("Dependency license must be a regular contained file")
+        data = path.read_bytes()
+        if digest(data) != item["sha256"]:
+            raise ValueError(f"Dependency license digest mismatch: {key}")
+        sections.append(f"\n[Bundled upstream notice: {item['path']}]\n{item['source']}\n" + data.decode("utf-8") + "\n")
+    return sections
+
+
 def third_party_notices(root=ROOT) -> bytes:
     resolved = {}
     for target in TARGETS:
@@ -172,11 +197,11 @@ def third_party_notices(root=ROOT) -> bytes:
             licenses.add(directory / package["license_file"])
         if package["name"] in ("rquickjs-core", "rquickjs-sys"):
             licenses.add(shared_quickjs_license)
-        if not licenses:
-            raise ValueError(f"Missing dependency license text: {package['name']} {package['version']}")
+        supplemental = pinned_license_notices(root, package) if not licenses else []
         sections.append(f"\n--- {package['name']} {package['version']} ({package.get('license') or 'see license text'}) ---\n")
         if package.get("repository"):
             sections.append(package["repository"] + "\n")
+        sections.extend(supplemental)
         for path in sorted(licenses, key=lambda p: (p.name, p.relative_to(directory).as_posix() if p.is_relative_to(directory) else "rquickjs/LICENSE")):
             label = path.relative_to(directory).as_posix() if path.is_relative_to(directory) else "rquickjs workspace LICENSE"
             sections.append(f"\n[{label}]\n" + path.read_text(encoding="utf-8") + "\n")

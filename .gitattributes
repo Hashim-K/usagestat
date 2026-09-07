@@ -1,3 +1,4 @@
 # Native archives must carry byte-identical resources on Windows, macOS and Linux.
 /plugins/** -text
 /LICENSE -text
+/tools/publish/licenses/** -text

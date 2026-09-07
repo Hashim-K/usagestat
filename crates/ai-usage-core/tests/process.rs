@@ -266,7 +266,10 @@ fn npm_shims_use_node_and_preserve_quotes_and_metacharacters() {
         "",
     ];
     command.args(arguments);
-    let output = process::run(command, Duration::from_secs(5), 4096).unwrap();
+    // This checks argv fidelity. Cold Node startup and Windows image scanning
+    // can exceed five seconds on a busy release runner. Dedicated tests retain
+    // strict timeout and cancellation bounds.
+    let output = process::run(command, Duration::from_secs(30), 4096).unwrap();
     assert!(
         output.status.success(),
         "{}",
