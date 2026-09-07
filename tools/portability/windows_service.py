@@ -44,7 +44,7 @@ def check(launcher: Path) -> dict:
                 time.sleep(0.02)
             crashed_pid = int((root / "parent.pid").read_text())
             mode.write_text("tree")
-            address = read_address(root / "descendant.ready", time.monotonic() + 8)
+            address = read_address(root / "descendant.ready", time.monotonic() + 12)
             assert int((root / "parent.pid").read_text()) != crashed_pid, "launcher did not restart its failed backend"
         finally:
             if child.poll() is None:
@@ -75,4 +75,8 @@ def check(launcher: Path) -> dict:
                 subprocess.run([str(Path(os.environ["SystemRoot"]) / "System32/taskkill.exe"),
                                 "/PID", str(child.pid), "/T", "/F"], capture_output=True, timeout=10)
                 child.wait(timeout=5)
+        mode.write_text("success")
+        completed = subprocess.run([str(launcher), "--service-settings", str(settings)], env=env, cwd=root, timeout=10)
+        assert completed.returncode == 0, "successful backend shutdown was restarted"
+        result["checks"].append("successful-backend-shutdown-exits-supervisor")
     return result

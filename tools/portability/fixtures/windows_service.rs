@@ -21,6 +21,7 @@ fn main() {
     }
     assert_eq!(args[1], "--service-settings");
     let root = path.parent().unwrap();
+    let mode = fs::read_to_string(root.join("fixture-mode")).unwrap();
     assert!(
         unsafe { GetConsoleWindow() }.is_null(),
         "background daemon received a console"
@@ -28,8 +29,11 @@ fn main() {
     fs::write(root.join("parent.pid"), std::process::id().to_string()).unwrap();
     println!("synthetic daemon stdout");
     eprintln!("synthetic daemon stderr");
-    if fs::read_to_string(root.join("fixture-mode")).unwrap() == "exit" {
+    if mode == "exit" {
         std::process::exit(37);
+    }
+    if mode == "success" {
+        return;
     }
     let _child = Command::new(env::current_exe().unwrap())
         .creation_flags(0x08000000)
