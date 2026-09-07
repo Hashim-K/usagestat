@@ -302,8 +302,8 @@ fn disabled_override(text: &str, label: &str) -> Result<Option<bool>> {
         };
         if name.trim().trim_matches('"') == label {
             return Ok(Some(match value.trim().trim_end_matches(';') {
-                "true" => true,
-                "false" => false,
+                "true" | "disabled" => true,
+                "false" | "enabled" => false,
                 _ => bail!("unexpected launchctl disabled-state output for {label}"),
             }));
         }
@@ -441,6 +441,16 @@ mod tests {
             Some(false)
         );
         assert_eq!(disabled_override(text, "missing").unwrap(), None);
+        for (value, expected) in [("enabled", false), ("disabled", true)] {
+            assert_eq!(
+                disabled_override(
+                    &format!("\"com.usagestat.fixture\" => {value}"),
+                    "com.usagestat.fixture"
+                )
+                .unwrap(),
+                Some(expected)
+            );
+        }
         assert!(
             disabled_override(
                 "\"com.usagestat.fixture\" => invalid",

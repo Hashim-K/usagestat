@@ -130,12 +130,12 @@ fn helper_resolution_works_with_only_an_explicit_background_path() {
     let binary = directory
         .0
         .join(format!("gh{}", std::env::consts::EXE_SUFFIX));
-    std::fs::copy(helper(), &binary).unwrap();
+    // Reuse the already-closed executable. Copying while other tests fork can
+    // briefly inherit its writable descriptor and make exec fail with ETXTBSY.
     #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o700)).unwrap();
-    }
+    std::os::unix::fs::symlink(helper(), &binary).unwrap();
+    #[cfg(windows)]
+    std::fs::copy(helper(), &binary).unwrap();
     let search = std::env::join_paths([&directory.0]).unwrap();
     let mut command = process::command_with_path(OsStr::new("gh"), Some(&search)).unwrap();
     command.args(["echo", "background 使用"]);
