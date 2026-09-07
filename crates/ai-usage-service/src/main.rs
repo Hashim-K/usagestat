@@ -6,7 +6,12 @@ mod native;
 #[cfg(windows)]
 fn main() {
     let mut args = std::env::args_os().skip(1);
-    if args.next().as_deref() != Some(std::ffi::OsStr::new("--service-settings")) {
+    let first = args.next();
+    if first.as_deref() == Some(std::ffi::OsStr::new("--version")) && args.next().is_none() {
+        println!("usagestat-service {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
+    if first.as_deref() != Some(std::ffi::OsStr::new("--service-settings")) {
         std::process::exit(2);
     }
     let Some(path) = args.next().map(std::path::PathBuf::from) else {

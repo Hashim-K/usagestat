@@ -7,8 +7,8 @@ install, upgrade, and removal commands, see the [installation guide](installatio
 
 Stable `vMAJOR.MINOR.PATCH` tags now run the complete release pipeline:
 
-1. Run the workspace tests and build both Linux architectures.
-2. Publish the GitHub release and its checksums.
+1. Run the workspace tests and build all five initial native targets.
+2. Validate extracted archives and publish eligible GitHub assets and checksums.
 3. Publish AUR, Homebrew, Fedora COPR, and the Ubuntu PPA in independent jobs.
 
 Prereleases such as `v1.0.4-beta.1` remain on GitHub. Package publishing validates
@@ -17,6 +17,14 @@ archive checksums and architectures, and generates recipe versions/checksums
 from those downloads. A missing credential fails the affected job explicitly;
 it does not silently skip a repository or prevent the other repositories from
 publishing.
+
+The native artifact workflow and schema are documented in
+[native release artifacts](native-artifacts.md). Manual Release workflow dispatch
+stages all targets without publishing. Stable publication retains Linux while
+macOS/Windows minimum-system qualification is pending; prereleases may include
+the unsigned desktop candidates. Existing release assets are compared against
+the tested source and hashes before any upload; different or incomplete releases
+stop for reconciliation rather than being overwritten.
 
 ### One-time GitHub Actions configuration
 

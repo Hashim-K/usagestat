@@ -25,7 +25,7 @@ mod control;
 mod http_request;
 
 #[derive(Debug, Parser)]
-#[command(name = "usagestatd")]
+#[command(name = "usagestatd", version)]
 #[command(about = "Local agent usage polling daemon")]
 struct Cli {
     /// Run the saved per-user service configuration.

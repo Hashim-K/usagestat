@@ -4,20 +4,27 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 env:
-  CARGO_TERM_COLOR: always
+  CARGO_TERM_COLOR: never
+  PYTHONUTF8: '1'
 
 jobs:
   test:
     name: Test workspace
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - name: Check tag matches the package version
+        if: github.event_name == 'push'
         run: |
           python3 - <<'PY'
           import os, tomllib
@@ -25,109 +32,159 @@ jobs:
               version = tomllib.load(manifest)['workspace']['package']['version']
           assert os.environ['GITHUB_REF_NAME'] == 'v' + version, 'Release tag must match Cargo.toml'
           PY
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: rustup default 1.89.0
       - run: cargo test --locked --workspace
+      - run: python -m unittest discover -s tools/publish/tests
 
   build:
     name: Build ${{ matrix.target }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.runner }}
     needs: test
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
             artifact: usagestat-linux-x86_64
+            runner: ubuntu-24.04
           - target: aarch64-unknown-linux-gnu
             artifact: usagestat-linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: aarch64-apple-darwin
+            artifact: usagestat-macos-aarch64
+            runner: macos-15
+          - target: x86_64-apple-darwin
+            artifact: usagestat-macos-x86_64
+            runner: macos-15-intel
+          - target: x86_64-pc-windows-msvc
+            artifact: usagestat-windows-x86_64
+            runner: windows-2025
+            rustflags: '-C target-feature=+crt-static'
+
+    env:
+      MACOSX_DEPLOYMENT_TARGET: '11.0'
+      RUSTFLAGS: ${{ matrix.rustflags || '' }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Select qualified Rust toolchain
+        run: rustup default 1.89.0
 
       - name: Cache cargo registry
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
+            ~/.cargo/registry
             ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('**/Cargo.lock') }}
+            target/${{ matrix.target }}/release
+          key: release-${{ matrix.runner }}-${{ matrix.target }}-rust-1.89.0-static-crt-${{ hashFiles('Cargo.lock') }}
 
-      - name: Install cross
-        run: |
-          if ! command -v cross >/dev/null 2>&1; then
-            cargo install cross --git https://github.com/cross-rs/cross
-          fi
+      - name: Test the native workspace
+        run: cargo test --locked --workspace --target ${{ matrix.target }}
 
       - name: Build
-        run: |
-          CARGO_TARGET_DIR=target/cross/${{ matrix.target }} \
-            cross build --release --locked --target ${{ matrix.target }} -p usagestat-cli -p usagestat-daemon
+        run: cargo build --release --locked --workspace --target ${{ matrix.target }}
 
       - name: Package
-        run: |
-          set -euo pipefail
-          mkdir -p dist package
-          cp target/cross/${{ matrix.target }}/${{ matrix.target }}/release/usagestat dist/${{ matrix.artifact }}
-          chmod 755 dist/${{ matrix.artifact }}
+        run: python tools/publish/scripts/native_artifacts.py --target ${{ matrix.target }} --binary-dir target/${{ matrix.target }}/release --output dist
 
-          cp dist/${{ matrix.artifact }} package/usagestat
-          cp target/cross/${{ matrix.target }}/${{ matrix.target }}/release/usagestatd package/usagestatd
-          cp LICENSE package/LICENSE
-          cp -a plugins package/plugins
-          tar -C package -czf dist/${{ matrix.artifact }}.tar.gz usagestat usagestatd LICENSE plugins
-
-          (cd dist && sha256sum ${{ matrix.artifact }} > ${{ matrix.artifact }}.sha256)
-          (cd dist && sha256sum ${{ matrix.artifact }}.tar.gz > ${{ matrix.artifact }}.tar.gz.sha256)
+      - name: Verify the extracted native archive
+        run: python tools/publish/scripts/native_artifacts.py --verify dist/${{ matrix.artifact }}.manifest.json
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: |
-            dist/${{ matrix.artifact }}
-            dist/${{ matrix.artifact }}.sha256
-            dist/${{ matrix.artifact }}.tar.gz
-            dist/${{ matrix.artifact }}.tar.gz.sha256
+          path: dist/${{ matrix.artifact }}*
+          if-no-files-found: error
+
+  aggregate:
+    name: Verify complete release inputs
+    runs-on: ubuntu-24.04
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: python tools/publish/scripts/native_artifacts.py --merge dist
+      - name: Verify existing Linux package consumers
+        run: |
+          python - <<'PY'
+          import subprocess, tomllib
+          from pathlib import Path
+          version = tomllib.loads(Path('Cargo.toml').read_text())['workspace']['package']['version']
+          # Production repositories only accept stable versions; archive tests
+          # still run for every prerelease above.
+          if '-' not in version:
+              subprocess.run(['python', 'tools/publish/scripts/prepare-packages.py', 'v' + version, 'dist', 'target/package-rehearsal'], check=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: usagestat-complete-release-inputs
+          path: dist
           if-no-files-found: error
 
   release:
     name: Publish GitHub Release
     runs-on: ubuntu-latest
-    needs: build
+    needs: aggregate
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    permissions:
+      contents: write
+    env:
+      RELEASE_CHANNEL: ${{ contains(github.ref_name, '-') && 'prerelease' || 'stable' }}
 
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          name: usagestat-complete-release-inputs
           path: dist
-          merge-multiple: true
+
+      - name: Select artifacts qualified for the release channel
+        run: python tools/publish/scripts/native_artifacts.py --prepare-publication dist --channel "$RELEASE_CHANNEL" --output target/publish-assets
+
+      - name: Check live tag and preserve any existing release
+        id: release-state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/publish/scripts/release_guard.py target/publish-assets
 
       - name: Create release
+        if: steps.release-state.outputs.create == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/usagestat-linux-x86_64
-            dist/usagestat-linux-x86_64.sha256
-            dist/usagestat-linux-x86_64.tar.gz
-            dist/usagestat-linux-x86_64.tar.gz.sha256
-            dist/usagestat-linux-aarch64
-            dist/usagestat-linux-aarch64.sha256
-            dist/usagestat-linux-aarch64.tar.gz
-            dist/usagestat-linux-aarch64.tar.gz.sha256
+          files: target/publish-assets/usagestat-*
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      - name: Verify live release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/publish/scripts/release_guard.py target/publish-assets --require-existing
 
   packages:
     name: Publish package repositories
     needs: release
-    if: ${{ !contains(github.ref_name, '-') }}
+    if: ${{ github.event_name == 'push' && !contains(github.ref_name, '-') }}
     uses: ./.github/workflows/publish-packages.yml
     with:
       tag: ${{ github.ref_name }}
