@@ -1,6 +1,9 @@
 name: Rehearse staged npm installation
 
 on:
+  push:
+    branches: [feat/native-backend-implementation]
+    paths: [.github/workflows/npm-rehearsal.yml, tools/portability/npm_install.py]
   workflow_dispatch:
     inputs:
       run_id:
@@ -32,10 +35,30 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Select an existing staged package set
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_RUN: ${{ inputs.run_id }}
+          SOURCE_BRANCH: ${{ github.ref_name }}
+        shell: python
+        run: |
+          import json, os, subprocess
+          selected = os.environ.get('REQUESTED_RUN')
+          if not selected:
+              runs = json.loads(subprocess.check_output(['gh', 'run', 'list', '--workflow', 'release.yml', '--branch', os.environ['SOURCE_BRANCH'], '--status', 'completed', '--limit', '5', '--json', 'databaseId'], text=True))
+              for run in runs:
+                  artifacts = json.loads(subprocess.check_output(['gh', 'api', 'repos/' + os.environ['GITHUB_REPOSITORY'] + '/actions/runs/' + str(run['databaseId']) + '/artifacts'], text=True))
+                  if any(a['name'] == 'usagestat-npm-packages' and not a['expired'] for a in artifacts['artifacts']):
+                      selected = str(run['databaseId'])
+                      break
+          assert selected and selected.isdecimal(), 'No completed Release run has staged npm packages'
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('run_id=' + selected + '\n')
       - uses: actions/download-artifact@v4
         with:
           name: usagestat-npm-packages
           path: target/npm-packages
-          run-id: ${{ inputs.run_id }}
+          run-id: ${{ steps.source.outputs.run_id }}
           github-token: ${{ github.token }}
       - run: python tools/portability/npm_install.py target/npm-packages/npm-packed.json
