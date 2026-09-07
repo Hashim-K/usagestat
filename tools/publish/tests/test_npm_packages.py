@@ -8,9 +8,21 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'tools/publish/scripts'))
-from npm_publish import validate, existing_matches
+from npm_publish import validate, existing_matches, publication_state, version_order
 
 class NpmPublicationTests(unittest.TestCase):
+    def test_retry_preserves_newer_tags_and_reports_unpromoted_existing_versions(self):
+        package = {'name': '@fixture/native', 'integrity': 'sha512-fixture',
+            'packageJson': {'name': '@fixture/native', 'version': '1.2.3'}}
+        document = {'dist-tags': {'latest': '1.2.3'}, 'versions': {'1.2.3': dict(package['packageJson'], dist={'integrity': package['integrity']})}}
+        self.assertTrue(publication_state(package, document, '1.2.3', 'latest'))
+        for tagged in ['1.2.2', '1.2.4']:
+            document['dist-tags']['latest'] = tagged
+            with self.assertRaises(ValueError): publication_state(package, document, '1.2.3', 'latest')
+        self.assertLess(version_order('1.2.3-beta.9'), version_order('1.2.3-beta.10'))
+        self.assertLess(version_order('1.2.3-rc.1'), version_order('1.2.3'))
+        self.assertEqual(version_order('1.2.3+build.1'), version_order('1.2.3'))
+
     def test_exact_payload_graph_and_tarball_integrity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

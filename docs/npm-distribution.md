@@ -48,6 +48,9 @@ publishes and verifies platforms before the main package, and rejects conflictin
 published bytes. Retries skip only matching integrity and metadata. It sets
 `latest`/`next` directly during publication; npm's trusted publishing does not
 automatically authenticate a separate `dist-tag` command.
+It rejects any retry that would move a tag backwards. If identical bytes already
+exist under a different tag, it stops before uploading and reports the explicit
+authenticated promotion needed; it never rewrites an existing release version.
 
 First publication and trust setup remain pending. Publication requires both
 `publicationEnabled: true` and repository variable `NPM_PUBLISH_ENABLED=true`.

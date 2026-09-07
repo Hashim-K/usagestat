@@ -5,6 +5,7 @@ import argparse
 import base64
 import hashlib
 import json
+import re
 from pathlib import Path
 import subprocess
 import urllib.error
@@ -37,14 +38,35 @@ def validate(plan: dict, directory: Path) -> list[dict]:
             raise ValueError('Packed npm integrity mismatch')
     return platforms + mains
 
-def registry_version(registry: str, name: str, version: str):
-    url = registry.rstrip('/') + '/' + urllib.parse.quote(name, safe='@') + '/' + urllib.parse.quote(version, safe='')
+def registry_package(registry: str, name: str):
+    url = registry.rstrip('/') + '/' + urllib.parse.quote(name, safe='@')
     try:
         with urllib.request.urlopen(url, timeout=30) as response:
-            return json.load(response)
+            data = response.read(16 * 1024 * 1024 + 1)
+            if len(data) > 16 * 1024 * 1024: raise ValueError('Registry metadata exceeds the size limit')
+            return json.loads(data)
     except urllib.error.HTTPError as error:
         if error.code == 404: return None
         raise ValueError(f'Registry verification failed with HTTP {error.code}') from None
+
+def version_order(value: str):
+    match = re.fullmatch(r'(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?', value)
+    if not match: raise ValueError('Invalid release version in registry metadata')
+    pre = match[4]
+    tokens = pre.split('.') if pre else []
+    if any(not token or (token.isdigit() and len(token) > 1 and token.startswith('0')) for token in tokens):
+        raise ValueError('Invalid prerelease version in registry metadata')
+    return tuple(int(match[i]) for i in (1, 2, 3)), (1 if pre is None else 0), tuple((0, int(token)) if token.isdigit() else (1, token) for token in tokens)
+
+def publication_state(package: dict, document, version: str, tag: str) -> bool:
+    if document is None: return False
+    tagged = document.get('dist-tags', {}).get(tag)
+    if tagged and version_order(tagged) > version_order(version):
+        raise ValueError(f"Refusing to move {package['name']}:{tag} backwards from {tagged}")
+    exists = existing_matches(package, document.get('versions', {}).get(version))
+    if exists and tagged != version:
+        raise ValueError(f"Identical {package['name']}@{version} exists under a different tag; verify and promote it with authenticated npm dist-tag before retrying")
+    return exists
 
 def existing_matches(package: dict, remote) -> bool:
     if remote is None: return False
@@ -68,7 +90,7 @@ def run(manifest: Path, publish: bool) -> None:
         raise ValueError('Production publication only supports the configured public npm registry')
     # Inspect every existing version before changing anything. A conflicting
     # partial publication must fail before uploading another package.
-    states = {p['name']: existing_matches(p, registry_version(registry, p['name'], plan['version'])) for p in packages}
+    states = {p['name']: publication_state(p, registry_package(registry, p['name']), plan['version'], plan['distTag']) for p in packages}
     if not publish:
         print(json.dumps({'version': plan['version'], 'distTag': plan['distTag'], 'publicationEnabled': settings['publicationEnabled'],
             'packages': [{'name': p['name'], 'state': 'identical' if states[p['name']] else 'missing'} for p in packages]}, indent=2))
@@ -80,7 +102,7 @@ def run(manifest: Path, publish: bool) -> None:
             # set the final tag atomically in publish instead of a later edit.
             subprocess.run([*npm_command(), 'publish', str((manifest.parent / package['tarball']).resolve()),
                 '--access', 'public', '--tag', plan['distTag'], '--ignore-scripts', '--provenance', '--registry', registry], check=True)
-        if not existing_matches(package, registry_version(registry, package['name'], plan['version'])):
+        if not publication_state(package, registry_package(registry, package['name']), plan['version'], plan['distTag']):
             raise ValueError('Published package was not visible; retry the same inputs after registry propagation')
     print('Verified all exact-version native payloads and published platform packages before the main package.')
 
