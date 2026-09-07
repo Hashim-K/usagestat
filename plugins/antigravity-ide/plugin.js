@@ -21,12 +21,25 @@
   // --- LS discovery ---
 
   function discoverLs(ctx) {
-    return ctx.host.ls.discover({
+    var options = {
       processName: "language_server",
       markers: ["antigravity-ide"],
       csrfFlag: "--csrf_token",
       portFlag: "--extension_server_port",
-    })
+    }
+    var settings = ctx.provider && ctx.provider.settings
+    if (settings && settings.ideProcessId != null) {
+      var pid = Number(settings.ideProcessId)
+      if (!Number.isInteger(pid) || pid <= 0 || pid > 4294967295) throw "Invalid ideProcessId; select a running IDE process."
+      options.pid = pid
+    }
+    if (typeof ctx.host.ls.discoverStatus !== "function") return ctx.host.ls.discover(options)
+    var report = ctx.host.ls.discoverStatus(options)
+    if (report.status === "ready") return report.result
+    if (report.status === "missing") return null
+    if (report.status === "ambiguous") throw "Multiple IDE instances match; close unused instances or set provider settings.ideProcessId."
+    if (report.status === "unsupported") throw { code: "unsupported", message: "Native IDE discovery is unavailable. On Windows, enable the installed Windows PowerShell/CIM components." }
+    throw { code: report.reasonCode === "ide-discovery-timed-out" ? "timed-out" : "failed", message: "IDE process discovery is unavailable or access was denied. Run the backend and IDE under the same signed-in user." }
   }
 
   function probePort(ctx, scheme, port, csrf) {

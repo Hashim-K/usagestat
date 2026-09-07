@@ -128,6 +128,10 @@ fn for_platform(
             Feature::new(native, "provider-qualification-pending"),
         ),
         (
+            "ide.languageServerDiscovery",
+            Feature::new(native, "native-fixtures-pending"),
+        ),
+        (
             "helpers.processTreeCleanup",
             Feature::new(native, "native-fixtures"),
         ),

@@ -2,6 +2,7 @@ mod cursor_paths;
 mod cursor_usage_export;
 mod cursor_usage_logs;
 mod host_api;
+mod language_server;
 mod loader;
 mod runtime;
 

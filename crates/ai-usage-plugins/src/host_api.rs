@@ -227,27 +227,6 @@ struct KeychainPasswordItem {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct LsDiscoverRequest {
-    process_name: String,
-    #[serde(default)]
-    markers: Vec<String>,
-    #[serde(default)]
-    csrf_flag: Option<String>,
-    #[serde(default)]
-    port_flag: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LsDiscoverResponse {
-    csrf: String,
-    ports: Vec<u16>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    extension_port: Option<u16>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct FireworksBillingExportRequest {
     #[serde(default)]
     api_key: String,
@@ -731,24 +710,35 @@ fn inject_keychain<'js>(
 
 fn inject_ls<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     let ls_obj = Object::new(ctx.clone())?;
-    ls_obj.set(
-        "_discoverRaw",
-        Function::new(
-            ctx.clone(),
-            move |ctx_inner: Ctx<'_>, req_json: String| -> rquickjs::Result<String> {
-                let request: LsDiscoverRequest =
-                    serde_json::from_str(&req_json).map_err(|error| {
+    for (name, detailed) in [("_discoverRaw", false), ("_discoverReportRaw", true)] {
+        ls_obj.set(
+            name,
+            Function::new(
+                ctx.clone(),
+                move |ctx_inner: Ctx<'_>, req_json: String| -> rquickjs::Result<String> {
+                    let request: crate::language_server::Request = serde_json::from_str(&req_json)
+                        .map_err(|_| {
+                            Exception::throw_message(
+                                &ctx_inner,
+                                "invalid language-server discovery request",
+                            )
+                        })?;
+                    let report = crate::language_server::discover(&request);
+                    let json = if detailed {
+                        serde_json::to_string(&report)
+                    } else {
+                        serde_json::to_string(&report.result)
+                    };
+                    json.map_err(|_| {
                         Exception::throw_message(
                             &ctx_inner,
-                            &format!("invalid language-server discovery request: {error}"),
+                            "language-server discovery serialization failed",
                         )
-                    })?;
-                let response = discover_language_server(&request);
-                serde_json::to_string(&response)
-                    .map_err(|error| Exception::throw_message(&ctx_inner, &error.to_string()))
-            },
-        )?,
-    )?;
+                    })
+                },
+            )?,
+        )?;
+    }
     host.set("ls", ls_obj)?;
     Ok(())
 }
@@ -759,6 +749,9 @@ fn patch_ls_wrapper(ctx: &Ctx<'_>) -> rquickjs::Result<()> {
         (function() {
             if (!__usagestat_ctx.host.ls || !__usagestat_ctx.host.ls._discoverRaw) return;
             var rawFn = __usagestat_ctx.host.ls._discoverRaw;
+            __usagestat_ctx.host.ls.discoverStatus = function(opts) {
+                return JSON.parse(__usagestat_ctx.host.ls._discoverReportRaw(JSON.stringify(opts || {})));
+            };
             __usagestat_ctx.host.ls.discover = function(opts) {
                 var response = rawFn(JSON.stringify(opts || {}));
                 if (response === "null") return null;
@@ -1537,95 +1530,6 @@ fn app_support_path_candidates(relative: &str) -> Vec<String> {
     }
 
     paths
-}
-
-fn discover_language_server(request: &LsDiscoverRequest) -> Option<LsDiscoverResponse> {
-    if request.process_name.trim().is_empty() {
-        return None;
-    }
-
-    if cfg!(target_os = "windows") {
-        return None;
-    }
-    let mut command = process::command("ps").ok()?;
-    if cfg!(target_os = "macos") {
-        command.args(["-axo", "pid=,command="]);
-    } else {
-        command.args(["-eo", "pid=,args="]);
-    }
-    let output = process::run(command, Duration::from_secs(5), COMMAND_OUTPUT_LIMIT_BYTES).ok()?;
-
-    if !output.status.success() {
-        return None;
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    for line in stdout.lines() {
-        if !line.contains(&request.process_name) {
-            continue;
-        }
-        if !request
-            .markers
-            .iter()
-            .all(|marker| marker.trim().is_empty() || line.contains(marker))
-        {
-            continue;
-        }
-
-        let csrf = request
-            .csrf_flag
-            .as_deref()
-            .and_then(|flag| extract_flag_value(line, flag))
-            .and_then(|value| non_empty_trimmed(&value))?;
-
-        let extension_port = request
-            .port_flag
-            .as_deref()
-            .and_then(|flag| extract_flag_value(line, flag))
-            .and_then(|value| value.parse::<u16>().ok());
-
-        let mut ports = Vec::new();
-        if let Some(port) = extension_port {
-            ports.push(port);
-        }
-        if ports.is_empty() {
-            continue;
-        }
-
-        return Some(LsDiscoverResponse {
-            csrf,
-            ports,
-            extension_port,
-        });
-    }
-
-    None
-}
-
-fn extract_flag_value(command: &str, flag: &str) -> Option<String> {
-    let flag = flag.trim();
-    if flag.is_empty() {
-        return None;
-    }
-    let flag_eq = format!("{flag}=");
-    let mut parts = command.split_whitespace().peekable();
-    while let Some(part) = parts.next() {
-        if part == flag {
-            return parts.next().map(clean_flag_value);
-        }
-        if let Some(rest) = part.strip_prefix(&flag_eq) {
-            return Some(clean_flag_value(rest));
-        }
-    }
-    None
-}
-
-fn clean_flag_value(value: &str) -> String {
-    value
-        .trim()
-        .trim_matches('"')
-        .trim_matches('\'')
-        .to_string()
 }
 
 fn non_empty_trimmed(value: &str) -> Option<String> {
