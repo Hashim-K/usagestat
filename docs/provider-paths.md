@@ -42,8 +42,9 @@ redirected roots and reuses the native host's actual JavaScript utility code.
 
 The native root behavior follows
 [VS Code's user-data resolver](https://github.com/microsoft/vscode/blob/main/src/vs/platform/environment/node/userDataPath.ts).
-The carried Kiro and Windsurf/Devin suffixes still require real-app version
-qualification; the new OS roots are inferred from the shared application layout.
+The carried Kiro suffixes and preview-variant names still require real-app version
+qualification. Devin documents the stable IDE roots below; private auth schemas
+remain unverified.
 [JetBrains documents native directories and `idea.config.path`](https://www.jetbrains.com/help/idea/directories-used-by-the-ide-to-store-settings-caches-plugins-and-logs.html).
 
 Cursor plugin authentication also uses the native database resolver. A missing
@@ -86,3 +87,36 @@ Resolution references checked 2026-09-07:
 [Claude directory and override](https://code.claude.com/docs/en/claude-directory),
 [Codex native home resolver](https://github.com/openai/codex/blob/main/codex-rs/utils/home-dir/src/lib.rs),
 [SQLite immutable URI semantics](https://www.sqlite.org/uri.html#uriimmutable).
+
+Antigravity's combined provider now searches only native `Antigravity` and
+`Antigravity IDE` roots. `settings.ideVariant` (`antigravity` or
+`antigravity-ide`) or `settings.userDataDir` selects a database without trying
+another process, CLI store or profile. Multiple discovered databases with auth
+require selection. Refreshed-token cache entries include a hash of the selected
+database path and its refresh-token identity; old unscoped entries are ignored.
+Native process ambiguity/denial remains explicit. The separate CLI provider
+reads only the exact `gemini` / `antigravity` account, with no service-only retry.
+These carried credential formats still need qualification with current app
+versions; root portability does not verify a private schema.
+
+The Devin provider supports `settings.authSource` (`auto`, `cli`, `ide`),
+`settings.credentialsPath`, and `settings.ideVariant` (`devin`, `devin-next`,
+`windsurf`, `windsurf-next`). A custom `settings.userDataDir` requires an IDE
+variant. Different accounts found in CLI/IDE installations require selection;
+auth failures never try another account. Identical credentials in migrated
+installations are deduplicated. The CLI reader keeps the existing Unix
+`.local/share/devin` then legacy `cognition` layout. On Windows it uses native
+local app data, honoring absolute `LOCALAPPDATA` and otherwise Known Folders,
+without guessed home-relative AppData. That CLI file location/schema remains
+unverified for current versions; `credentialsPath` selects the actual file.
+[Devin's FAQ documents its native IDE roots and migration](https://docs.devin.ai/desktop/devin-desktop-faq).
+
+Perplexity's existing app-cache reader requires the legacy macOS CFNetwork
+SQLite schema and Apple app request metadata. Speculative Chromium/Linux/Windows
+cache paths have been removed. This authentication method reports `unsupported`
+on Linux/Windows before looking for files; it does not establish that the
+provider or upstream desktop app is unsupported. On macOS `settings.cacheDbPath`
+selects one exact legacy cache. This plugin currently has no manual web-cookie
+implementation despite its manifest declaring a web mode; that is an explicit
+inventory gap, not a supported fallback. Current app versions also need schema
+qualification; [Perplexity documents an app migration](https://www.perplexity.ai/help-center/en/collections/19800000-perplexity-desktop-app).

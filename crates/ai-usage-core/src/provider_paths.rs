@@ -22,6 +22,21 @@ pub fn app_support_dir() -> Option<PathBuf> {
 }
 
 pub fn app_support_path(relative: &str) -> Option<PathBuf> {
+    append_suffix(app_support_dir(), relative)
+}
+
+/// Native local app data. Honor an absolute LOCALAPPDATA override on Windows,
+/// using Known Folders when absent; other platforms use dirs' native data root.
+pub fn local_app_data_path(relative: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    if let Some(value) = std::env::var_os("LOCALAPPDATA").filter(|value| !value.is_empty()) {
+        let path = PathBuf::from(value);
+        return append_suffix(path.is_absolute().then_some(path), relative);
+    }
+    append_suffix(dirs::data_local_dir(), relative)
+}
+
+fn append_suffix(root: Option<PathBuf>, relative: &str) -> Option<PathBuf> {
     // Plugins pass portable slash-separated suffixes, never another root.
     if relative.is_empty()
         || relative.contains(['\\', ':', '\0'])
@@ -31,7 +46,7 @@ pub fn app_support_path(relative: &str) -> Option<PathBuf> {
     {
         return None;
     }
-    app_support_dir().map(|root| root.join(relative))
+    root.map(|root| root.join(relative))
 }
 
 pub fn claude_usage_roots() -> Result<Vec<PathBuf>, ProviderPathError> {

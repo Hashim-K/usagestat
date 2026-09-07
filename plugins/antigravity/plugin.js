@@ -1,9 +1,5 @@
 (function () {
   var LS_SERVICE = "exa.language_server_pb.LanguageServerService"
-  var STATE_DBS = [
-    "~/Library/Application Support/Antigravity IDE/User/globalStorage/state.vscdb",
-    "~/Library/Application Support/Antigravity/User/globalStorage/state.vscdb",
-  ]
   var AGY_KEYCHAIN_SERVICE = "gemini"
   var AGY_KEYCHAIN_ACCOUNT = "antigravity"
   var CLOUD_CODE_URLS = [
@@ -80,37 +76,16 @@
 
   // --- SQLite credential reading ---
 
-  /** VS Code-style data dirs: macOS Library, Linux/Unix XDG config, Windows %APPDATA%. */
+  function providerSettings(ctx) { return (ctx.provider && ctx.provider.settings) || {} }
+
   function antigravityStateDbPaths(ctx) {
-    var paths = []
-    var seen = {}
-    function add(p) {
-      if (!p || typeof p !== "string") return
-      var norm = p.replace(/\\/g, "/")
-      if (seen[norm]) return
-      seen[norm] = true
-      paths.push(p)
-    }
-    for (var i = 0; i < STATE_DBS.length; i++) add(STATE_DBS[i])
-    try {
-      if (ctx.host.env && typeof ctx.host.env.get === "function") {
-        var ap = ctx.host.env.get("APPDATA")
-        if (ap && String(ap).trim()) {
-          add(String(ap).replace(/\\/g, "/") + "/Antigravity/User/globalStorage/state.vscdb")
-          add(String(ap).replace(/\\/g, "/") + "/Antigravity IDE/User/globalStorage/state.vscdb")
-        }
-        var xdg = ctx.host.env.get("XDG_CONFIG_HOME")
-        if (xdg && String(xdg).trim()) {
-          add(String(xdg).replace(/\\/g, "/") + "/Antigravity/User/globalStorage/state.vscdb")
-          add(String(xdg).replace(/\\/g, "/") + "/Antigravity IDE/User/globalStorage/state.vscdb")
-        }
-      }
-    } catch (e) {
-      /* ignore missing env API */
-    }
-    add("~/.config/Antigravity/User/globalStorage/state.vscdb")
-    add("~/.config/Antigravity IDE/User/globalStorage/state.vscdb")
-    return paths
+    var opts = providerSettings(ctx)
+    if (opts.userDataDir) return [opts.userDataDir.replace(/[\\/]+$/, "") + "/User/globalStorage/state.vscdb"]
+    var variants = {"antigravity": "Antigravity", "antigravity-ide": "Antigravity IDE"}
+    if (opts.ideVariant && !variants[opts.ideVariant]) throw {code: "failed", message: "Unknown Antigravity ideVariant; use antigravity or antigravity-ide."}
+    return (opts.ideVariant ? [opts.ideVariant] : Object.keys(variants)).map(function(id) {
+      return ctx.host.fs.appSupportPath(variants[id] + "/User/globalStorage/state.vscdb")
+    }).filter(function(path) { return !!path && ctx.host.fs.exists(path) })
   }
 
   // Antigravity wraps OAuth state in a double-base64 envelope:
@@ -164,14 +139,18 @@
     var paths = antigravityStateDbPaths(ctx)
     for (var i = 0; i < paths.length; i++) {
       var tokens = loadOAuthTokensFromDb(ctx, paths[i])
-      if (tokens) candidates.push(tokens)
+      if (tokens) {
+        tokens.profileKey = ctx.host.crypto.sha256Hex(paths[i] + "\n" + (tokens.refreshToken || tokens.accessToken))
+        candidates.push(tokens)
+      }
     }
+    if (candidates.length > 1) throw {code: "failed", message: "Multiple Antigravity credential profiles found; set settings.ideVariant or userDataDir."}
     return candidates
   }
 
   // --- Google OAuth token refresh ---
 
-  function refreshAccessToken(ctx, refreshTokenValue) {
+  function refreshAccessToken(ctx, refreshTokenValue, profileKey) {
     if (!refreshTokenValue) {
       ctx.host.log.warn("refresh skipped: no refresh token")
       return null
@@ -199,7 +178,7 @@
         return null
       }
       var expiresIn = (typeof body.expires_in === "number") ? body.expires_in : 3600
-      cacheToken(ctx, body.access_token, expiresIn)
+      cacheToken(ctx, body.access_token, expiresIn, profileKey)
       return body.access_token
     } catch (e) {
       ctx.host.log.warn("Google OAuth refresh failed: " + String(e))
@@ -209,12 +188,12 @@
 
   // --- Token cache ---
 
-  function loadCachedToken(ctx) {
+  function loadCachedToken(ctx, profileKey) {
     var path = ctx.app.pluginDataDir + "/auth.json"
     try {
       if (!ctx.host.fs.exists(path)) return null
       var data = ctx.util.tryParseJson(ctx.host.fs.readText(path))
-      if (!data || !data.accessToken || !data.expiresAtMs) return null
+      if (!data || !profileKey || data.profileKey !== profileKey || !data.accessToken || !data.expiresAtMs) return null
       if (data.expiresAtMs <= Date.now()) return null
       return data.accessToken
     } catch (e) {
@@ -223,11 +202,12 @@
     }
   }
 
-  function cacheToken(ctx, accessToken, expiresInSeconds) {
+  function cacheToken(ctx, accessToken, expiresInSeconds, profileKey) {
     var path = ctx.app.pluginDataDir + "/auth.json"
     try {
       ctx.host.fs.writeText(path, JSON.stringify({
         accessToken: accessToken,
+        profileKey: profileKey,
         expiresAtMs: Date.now() + (expiresInSeconds || 3600) * 1000,
       }))
     } catch (e) {
@@ -312,22 +292,27 @@
 
   // --- LS discovery ---
 
+  function discoverNative(ctx, options) {
+    if (typeof ctx.host.ls.discoverStatus !== "function") return ctx.host.ls.discover(options)
+    var report = ctx.host.ls.discoverStatus(options)
+    if (report.status === "ready") return report.result
+    if (report.status === "missing") return null
+    if (report.status === "ambiguous") throw {code: "failed", message: "Multiple Antigravity processes found; select settings.ideProcessId or use the separate CLI provider."}
+    throw {code: report.status === "unsupported" ? "unsupported" : report.reasonCode === "ide-discovery-timed-out" ? "timed-out" : "failed", message: "Antigravity process discovery is unavailable; run the backend and app as the same signed-in user."}
+  }
+
   function discoverLs(ctx) {
-    return ctx.host.ls.discover({
-      processName: "language_server",
-      markers: ["antigravity", "antigravity-ide"],
-      csrfFlag: "--csrf_token",
-      portFlag: "--extension_server_port",
-    })
+    var options = {processName: "language_server", markers: ["antigravity", "antigravity-ide"], csrfFlag: "--csrf_token", portFlag: "--extension_server_port"}
+    var pid = providerSettings(ctx).ideProcessId
+    if (pid != null) {
+      if (!Number.isInteger(Number(pid)) || Number(pid) <= 0 || Number(pid) > 4294967295) throw {code: "failed", message: "Invalid Antigravity ideProcessId."}
+      options.pid = Number(pid)
+    }
+    return discoverNative(ctx, options)
   }
 
   function discoverAgyLs(ctx) {
-    return ctx.host.ls.discover({
-      processName: "agy",
-      markers: [],
-      csrfFlag: "",
-      portFlag: null,
-    })
+    return discoverNative(ctx, {processName: "agy", markers: [], csrfFlag: "", portFlag: null})
   }
 
   function probePort(ctx, scheme, port, csrf) {
@@ -671,13 +656,20 @@
   // --- Probe ---
 
   function probe(ctx) {
-    var lsResult = probeLs(ctx)
-    if (lsResult) return lsResult
-
-    var agyLsResult = probeAgyLs(ctx)
-    if (agyLsResult) return agyLsResult
-
+    var opts = providerSettings(ctx)
+    var explicitDb = !!(opts.userDataDir || opts.ideVariant)
+    if (explicitDb && opts.ideProcessId != null) throw {code: "failed", message: "Select an Antigravity database profile or a process ID, not both."}
+    if (!explicitDb) {
+      var lsResult = probeLs(ctx)
+      if (lsResult) return lsResult
+      if (opts.ideProcessId != null) throw LOGIN_MESSAGE
+    }
     var dbTokenCandidates = loadOAuthTokenCandidates(ctx)
+    if (explicitDb && !dbTokenCandidates.length) throw LOGIN_MESSAGE
+    if (!dbTokenCandidates.length) {
+      var agyLsResult = probeAgyLs(ctx)
+      if (agyLsResult) return agyLsResult
+    }
 
     var tokens = []
     var nowSec = Math.floor(Date.now() / 1000)
@@ -688,7 +680,8 @@
       }
     }
 
-    var cached = loadCachedToken(ctx)
+    var profileKey = dbTokenCandidates.length ? dbTokenCandidates[0].profileKey : null
+    var cached = loadCachedToken(ctx, profileKey)
     if (cached && tokens.indexOf(cached) === -1) tokens.push(cached)
 
     var ccData = null
@@ -713,7 +706,7 @@
         if (refreshToken && refreshTokens.indexOf(refreshToken) === -1) refreshTokens.push(refreshToken)
       }
       for (var k = 0; k < refreshTokens.length; k++) {
-        var refreshed = refreshAccessToken(ctx, refreshTokens[k])
+        var refreshed = refreshAccessToken(ctx, refreshTokens[k], profileKey)
         if (!refreshed) continue
         var refreshedData = probeCloudCode(ctx, refreshed)
         if (refreshedData && !refreshedData._authFailed) {
@@ -724,7 +717,7 @@
       }
     }
 
-    if (!ccData || ccData._authFailed) {
+    if (!dbTokenCandidates.length && (!ccData || ccData._authFailed)) {
       var agyToken = loadAgyKeychainToken(ctx)
       if (agyToken) {
         var agyResult = probeAgyCloudCode(ctx, agyToken)

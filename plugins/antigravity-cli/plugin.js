@@ -47,16 +47,9 @@
     }
 
     try {
-      var accountValue = ctx.host.keychain.readGenericPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
-      if (accountValue) return accountValue
+      return ctx.host.keychain.readGenericPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT)
     } catch (e) {
-      ctx.host.log.info("antigravity-cli account keychain read failed: " + String(e))
-    }
-
-    try {
-      return ctx.host.keychain.readGenericPassword(KEYCHAIN_SERVICE)
-    } catch (e) {
-      ctx.host.log.info("antigravity-cli service keychain read failed: " + String(e))
+      if (/credential-(denied|unavailable|account-mismatch|malformed):/.test(String(e))) throw e
       return null
     }
   }

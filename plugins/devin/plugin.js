@@ -2,33 +2,11 @@
   var CLOUD_SERVICE = "exa.seat_management_pb.SeatManagementService"
   var DEFAULT_API_SERVER_URL = "https://server.codeium.com"
   var CLOUD_COMPAT_VERSION = "1.108.2"
-  // Devin CLI: ~/.local/share/devin/ (Linux/macOS); %LOCALAPPDATA%\devin\ on Windows.
-  // Legacy cognition CLI dir kept during migration (docs.devin.ai/cli/changelog/stable).
-  var CREDENTIALS_PATHS = [
-    "~/.local/share/devin/credentials.toml",
-    "~/AppData/Local/devin/credentials.toml",
-    "~/.local/share/cognition/credentials.toml",
-  ]
-  // Devin Desktop FAQ: Devin app data under Devin/; legacy Windsurf/ still read.
   var APP_STATE_VARIANTS = [
-    {
-      source: "Devin app",
-      appSupportRel: "Devin/User/globalStorage/state.vscdb",
-      stateDbFallback:
-        "~/Library/Application Support/Devin/User/globalStorage/state.vscdb",
-    },
-    {
-      source: "Devin - Next app",
-      appSupportRel: "Devin - Next/User/globalStorage/state.vscdb",
-      stateDbFallback:
-        "~/Library/Application Support/Devin - Next/User/globalStorage/state.vscdb",
-    },
-    {
-      source: "Devin app (legacy Windsurf)",
-      appSupportRel: "Windsurf/User/globalStorage/state.vscdb",
-      stateDbFallback:
-        "~/Library/Application Support/Windsurf/User/globalStorage/state.vscdb",
-    },
+    {id: "devin", source: "Devin app", appSupportRel: "Devin/User/globalStorage/state.vscdb"},
+    {id: "devin-next", source: "Devin - Next app", appSupportRel: "Devin - Next/User/globalStorage/state.vscdb"},
+    {id: "windsurf", source: "Devin app (legacy Windsurf)", appSupportRel: "Windsurf/User/globalStorage/state.vscdb"},
+    {id: "windsurf-next", source: "Windsurf - Next app", appSupportRel: "Windsurf - Next/User/globalStorage/state.vscdb"},
   ]
   var LOGIN_HINT = "Run devin auth login or sign in to Devin and try again."
   var QUOTA_HINT = "Devin quota data unavailable. Try again later."
@@ -134,27 +112,24 @@
     )
   }
 
+  function settings(ctx) { return (ctx.provider && ctx.provider.settings) || {} }
+
   function resolveCredentialsPath(ctx) {
-    if (ctx.host.fs && typeof ctx.host.fs.firstExisting === "function") {
-      var found = ctx.host.fs.firstExisting(CREDENTIALS_PATHS)
-      if (found) return found
-    }
-    for (var i = 0; i < CREDENTIALS_PATHS.length; i++) {
-      if (ctx.host.fs.exists(CREDENTIALS_PATHS[i])) return CREDENTIALS_PATHS[i]
-    }
-    return null
+    var explicit = settings(ctx).credentialsPath
+    if (explicit) return ctx.host.fs.exists(explicit) ? explicit : null
+    // Carried CLI layout; credentialsPath supports other CLI versions without
+    // guessing a different account's directory. Never search Unix paths on Windows.
+    var paths = ctx.app.platform === "windows"
+      ? [ctx.host.fs.localAppDataPath("devin/credentials.toml")]
+      : ["~/.local/share/devin/credentials.toml", "~/.local/share/cognition/credentials.toml"]
+    return ctx.host.fs.firstExisting(paths.filter(function(path) { return !!path })) || null
   }
 
   function resolveStateDbForVariant(ctx, variant) {
-    if (
-      ctx.host.fs &&
-      typeof ctx.host.fs.firstExistingAppSupport === "function"
-    ) {
-      var found = ctx.host.fs.firstExistingAppSupport(variant.appSupportRel)
-      if (found) return found
-    }
-    if (ctx.host.fs.exists(variant.stateDbFallback)) return variant.stateDbFallback
-    return null
+    var custom = settings(ctx).userDataDir
+    var path = custom ? custom.replace(/[\\/]+$/, "") + "/User/globalStorage/state.vscdb"
+      : ctx.host.fs.appSupportPath(variant.appSupportRel)
+    return path && ctx.host.fs.exists(path) ? path : null
   }
 
   function loadCredentialsFile(ctx) {
@@ -164,8 +139,7 @@
       var text = ctx.host.fs.readText(credentialsPath)
       var apiKey = readTomlString(text, "windsurf_api_key")
       if (!apiKey) {
-        ctx.host.log.warn("Devin credentials missing windsurf_api_key")
-        return null
+        throw {code: "credential-malformed", message: "Selected Devin credentials do not contain windsurf_api_key; select the correct credentialsPath or sign in again."}
       }
       return {
         apiKey: apiKey,
@@ -173,8 +147,8 @@
         source: "credentials.toml",
       }
     } catch (e) {
-      ctx.host.log.warn("failed to read Devin credentials: " + String(e))
-      return null
+      if (e && e.code) throw e
+      throw {code: "credential-unavailable", message: "Cannot read the selected Devin credential file."}
     }
   }
 
@@ -331,42 +305,36 @@
     return auth.apiKey + "\n" + effectiveApiServerUrl(auth)
   }
 
-  function alreadyAttempted(attempts, auth) {
-    var fingerprint = authFingerprint(auth)
-    for (var i = 0; i < attempts.length; i++) {
-      if (attempts[i] === fingerprint) return true
-    }
-    return false
-  }
-
   function probe(ctx) {
-    var sawApiKey = false
-    var sawAuthFailure = false
-    var attempts = []
-
-    var credentials = loadCredentialsFile(ctx)
-    if (credentials) {
-      sawApiKey = true
-      attempts.push(authFingerprint(credentials))
-      var credentialsAttempt = tryAuth(ctx, credentials)
-      if (credentialsAttempt.output) return credentialsAttempt.output
-      if (credentialsAttempt.authFailure) sawAuthFailure = true
+    var opts = settings(ctx)
+    var source = opts.authSource || (opts.credentialsPath ? "cli" : opts.ideVariant || opts.userDataDir ? "ide" : "auto")
+    if (["auto", "cli", "ide"].indexOf(source) < 0) throw {code: "failed", message: "Set Devin settings.authSource to auto, cli or ide."}
+    if ((opts.credentialsPath && source !== "cli") || ((opts.ideVariant || opts.userDataDir) && source !== "ide")) {
+      throw {code: "failed", message: "Select either a Devin CLI credential file or an IDE profile."}
     }
-
-    for (var i = 0; i < APP_STATE_VARIANTS.length; i++) {
-      var appAuth = readAppAuth(ctx, APP_STATE_VARIANTS[i])
-      if (!appAuth) continue
-      if (alreadyAttempted(attempts, appAuth)) continue
-      sawApiKey = true
-      attempts.push(authFingerprint(appAuth))
-      var appAttempt = tryAuth(ctx, appAuth)
-      if (appAttempt.output) return appAttempt.output
-      if (appAttempt.authFailure) sawAuthFailure = true
+    var variants = APP_STATE_VARIANTS
+    if (opts.ideVariant) {
+      variants = variants.filter(function(variant) { return variant.id === opts.ideVariant })
+      if (!variants.length) throw {code: "failed", message: "Unknown Devin ideVariant; use devin, devin-next, windsurf or windsurf-next."}
     }
-
-    if (sawAuthFailure) throw LOGIN_HINT
-    if (sawApiKey) throw QUOTA_HINT
-    throw LOGIN_HINT
+    if (opts.userDataDir && !opts.ideVariant) throw {code: "failed", message: "Set ideVariant when selecting a Devin userDataDir."}
+    var candidates = []
+    if (source !== "ide") {
+      var credentials = loadCredentialsFile(ctx)
+      if (credentials) candidates.push(credentials)
+    }
+    if (source !== "cli") {
+      for (var i = 0; i < variants.length; i++) {
+        var auth = readAppAuth(ctx, variants[i])
+        if (auth && !candidates.some(function(candidate) { return authFingerprint(candidate) === authFingerprint(auth) })) candidates.push(auth)
+      }
+    }
+    if (candidates.length > 1) throw {code: "failed", message: "Multiple Devin accounts or installations found; select settings.authSource and credentialsPath or ideVariant."}
+    if (!candidates.length) throw LOGIN_HINT
+    // Once selected, a rejected token cannot silently select another account.
+    var attempt = tryAuth(ctx, candidates[0])
+    if (attempt.output) return attempt.output
+    throw attempt.authFailure ? LOGIN_HINT : QUOTA_HINT
   }
 
   globalThis.__openusage_plugin = { id: "devin", probe: probe }

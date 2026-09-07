@@ -474,6 +474,14 @@ fn inject_fs<'js>(ctx: &Ctx<'js>, host: &Object<'js>) -> rquickjs::Result<()> {
     )?;
 
     fs_obj.set(
+        "localAppDataPath",
+        Function::new(ctx.clone(), move |relative: String| -> Option<String> {
+            usagestat_core::provider_paths::local_app_data_path(&relative)
+                .map(|path| path.to_string_lossy().into_owned())
+        })?,
+    )?;
+
+    fs_obj.set(
         "firstExistingAppSupport",
         Function::new(ctx.clone(), move |relative: String| -> Option<String> {
             first_existing_app_support_path(&relative)

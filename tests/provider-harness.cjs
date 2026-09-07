@@ -32,6 +32,7 @@ function providerHarness(id, options = {}) {
     env: {get: name => env[name] || null},
     fs: {
       homeDir: home,
+      localAppDataPath: relative => paths.join(options.localAppData || (platform === 'windows' ? 'E:\\Redirected Local 使用' : home + '/.local/share'), relative),
       appSupportPath: relative => options.appSupportUnavailable ? null : paths.join(appSupport, relative),
       exists,
       readText(name) { const key = normalize(name); calls.files.push(key); if (!files.has(key)) throw new Error('fixture file missing'); return files.get(key); },
