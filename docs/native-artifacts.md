@@ -1,8 +1,12 @@
 # Native release artifacts
 
 Implementation: [#14](https://github.com/hashimkarim/usagestat/issues/14).
-Native archive qualification is pending; these assets are not newly published
-downloads. Existing Linux asset names and package consumers are preserved.
+The [five-target release rehearsal](https://github.com/hashimkarim/usagestat/actions/runs/34076870575)
+passed on September 7, 2026 at commit `79c7cea`: each native runner built,
+extracted and smoke-tested its complete package. Aggregation verified matching
+resources and legacy Linux package inputs. The artifacts are available in that
+CI run; no new release was published. Existing Linux asset names and package
+consumers are preserved. Minimum-OS execution remains part of #20.
 
 | Target | Archive | Contents |
 | --- | --- | --- |
