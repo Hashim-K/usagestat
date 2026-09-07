@@ -15,6 +15,20 @@ guard_spec.loader.exec_module(guard)
 
 
 class NativeArtifactTests(unittest.TestCase):
+    def test_resource_allowlist_excludes_provider_tests_and_development_files(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            provider = root / 'plugins/fixture'
+            provider.mkdir(parents=True)
+            (provider / 'plugin.json').write_text(json.dumps({'entry': 'plugin.js'}))
+            tracked = ['LICENSE', 'plugins/README.md', 'plugins/fixture/plugin.json', 'plugins/fixture/plugin.js',
+                'plugins/fixture/plugin.test.js', 'plugins/fixture/icon.svg', 'plugins/fixture/icon-color.svg']
+            self.assertEqual(artifacts.runtime_resource_names(root, tracked), [
+                'LICENSE', 'plugins/fixture/icon-color.svg', 'plugins/fixture/icon.svg',
+                'plugins/fixture/plugin.js', 'plugins/fixture/plugin.json'])
+            (provider / 'plugin.json').write_text(json.dumps({'entry': '../outside.js'}))
+            with self.assertRaises(ValueError): artifacts.runtime_resource_names(root, tracked)
+
     def fixture(self, files, executable, windows):
         data = artifacts.archive_bytes(files, executable, windows)
         name = 'fixture.zip' if windows else 'fixture.tar.gz'

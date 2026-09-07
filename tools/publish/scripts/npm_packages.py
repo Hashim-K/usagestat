@@ -49,6 +49,8 @@ def assemble(directory: Path, output: Path, channel: str) -> Path:
             raise ValueError('Native inputs must have matching clean versions and commits')
         if manifest['resourcesSha256'] != manifests[0]['resourcesSha256']:
             raise ValueError('Native targets have different bundled resources')
+        if any(item['path'].endswith(('.test.js', '.spec.js')) or '/fixtures/' in item['path'] for item in manifest['files']):
+            raise ValueError('Native inputs contain development fixtures; rebuild with the runtime resource allowlist')
         if manifest['archive']['name'] != metadata['asset'] + ('.zip' if manifest['os'] == 'win32' else '.tar.gz'):
             raise ValueError('Unexpected native archive name')
     output.mkdir(parents=True, exist_ok=False)

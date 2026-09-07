@@ -115,6 +115,7 @@ def inspect_binary(data: bytes, target: str) -> dict:
 
 def resource_files(root=ROOT) -> dict[str, bytes]:
     names = subprocess.check_output(["git", "ls-files", "-z", "--", "plugins", "LICENSE"], cwd=root).decode().split("\0")
+    names = runtime_resource_names(root, list(filter(None, names)))
     result = {}
     for name in filter(None, names):
         path = root / name
@@ -127,6 +128,26 @@ def resource_files(root=ROOT) -> dict[str, bytes]:
     # carrying notices for the native/static dependencies in the same payload.
     result["LICENSE"] += third_party_notices(root)
     return result
+
+def runtime_resource_names(root: Path, tracked: list[str]) -> list[str]:
+    """Only manifests, their entry scripts, icons and licenses enter a release."""
+    names = set(tracked)
+    selected = {"LICENSE"} if "LICENSE" in names else set()
+    for name in sorted(names):
+        path = PurePosixPath(name)
+        if len(path.parts) != 3 or path.name != "plugin.json":
+            continue
+        manifest = json.loads((root / name).read_text(encoding="utf-8"))
+        entry = manifest.get("entry")
+        if not isinstance(entry, str) or not entry or "\\" in entry or ":" in entry or any(part in ("", ".", "..") for part in entry.split("/")):
+            raise ValueError(f"Unsafe provider entry resource: {name}")
+        script = str(path.parent / entry)
+        if script not in names or script.endswith((".test.js", ".spec.js")):
+            raise ValueError(f"Missing runtime provider entry resource: {name}")
+        selected.update([name, script])
+        selected.update(item for item in names if PurePosixPath(item).parent == path.parent
+            and (PurePosixPath(item).suffix.lower() in (".svg", ".png", ".jpg", ".webp") or PurePosixPath(item).name in ("LICENSE", "NOTICE")))
+    return sorted(selected)
 
 def third_party_notices(root=ROOT) -> bytes:
     resolved = {}
