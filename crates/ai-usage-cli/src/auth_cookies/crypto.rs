@@ -184,6 +184,14 @@ fn passwords(profile: &Profile) -> Result<Vec<String>> {
     }
 }
 pub(super) fn mac_password(service: &str, account: &str) -> Result<String> {
+    mac_password_in(service, account, None)
+}
+
+pub(super) fn mac_password_in(
+    service: &str,
+    account: &str,
+    keychain: Option<&std::path::Path>,
+) -> Result<String> {
     let mut command = process::command("/usr/bin/security").map_err(|_| {
         error(
             "KEYCHAIN_UNAVAILABLE",
@@ -191,6 +199,9 @@ pub(super) fn mac_password(service: &str, account: &str) -> Result<String> {
         )
     })?;
     command.args(["find-generic-password", "-s", service, "-a", account, "-w"]);
+    if let Some(path) = keychain {
+        command.arg(path);
+    }
     let output = process::run(command, Duration::from_secs(30), 64 * 1024).map_err(|_| error("KEYCHAIN_UNAVAILABLE", "Keychain request timed out or is unavailable. Unlock your login Keychain or use manual credentials."))?;
     if !output.status.success() {
         return Err(match output.status.code() {

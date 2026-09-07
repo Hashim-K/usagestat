@@ -293,52 +293,62 @@ fn cbc_platform_derivation_matches_independent_openssl_vectors() {
 #[test]
 fn native_disposable_browser_keychain_item_is_exact_and_read_only() {
     use usagestat_core::process;
-    let service = format!(
-        "usagestat-browser-fixture-{}-{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos()
-    );
-    let account = "synthetic-browser-fixture";
-    assert!(crypto::mac_password(&service, account).is_err());
-    struct Cleanup(String);
-    impl Drop for Cleanup {
-        fn drop(&mut self) {
-            let mut command = process::command("/usr/bin/security").unwrap();
-            command.args([
-                "delete-generic-password",
-                "-s",
-                &self.0,
-                "-a",
-                "synthetic-browser-fixture",
-            ]);
-            let _ = process::run(command, Duration::from_secs(30), 4096);
-        }
-    }
-    let mut command = process::command("/usr/bin/security").unwrap();
-    command.args([
-        "add-generic-password",
-        "-s",
-        &service,
-        "-a",
-        account,
-        "-w",
-        " synthetic browser key ",
-    ]);
-    assert!(
+    fn security(args: &[&std::ffi::OsStr]) -> bool {
+        let mut command = process::command("/usr/bin/security").unwrap();
+        command.args(args);
         process::run(command, Duration::from_secs(30), 4096)
             .unwrap()
             .status
             .success()
-    );
-    let cleanup = Cleanup(service.clone());
+    }
+    let root = tempfile::tempdir().unwrap();
+    let keychain = root.path().join("synthetic-browser.keychain-db");
+    let password = std::ffi::OsStr::new("synthetic-test-keychain-password");
+    // Hosted runners may have a locked login keychain. Test our own store
+    // without unlocking or replacing the user's login keychain.
+    assert!(security(&[
+        "create-keychain".as_ref(),
+        "-p".as_ref(),
+        password,
+        keychain.as_os_str()
+    ]));
+    struct Cleanup(PathBuf);
+    impl Drop for Cleanup {
+        fn drop(&mut self) {
+            let mut command = process::command("/usr/bin/security").unwrap();
+            command.arg("delete-keychain").arg(&self.0);
+            let _ = process::run(command, Duration::from_secs(30), 4096);
+        }
+    }
+    let cleanup = Cleanup(keychain.clone());
+    assert!(security(&[
+        "unlock-keychain".as_ref(),
+        "-p".as_ref(),
+        password,
+        keychain.as_os_str()
+    ]));
+    let service = "usagestat-synthetic-browser-service";
+    let account = "synthetic-browser-account";
+    assert!(crypto::mac_password_in(service, account, Some(&keychain)).is_err());
+    assert!(security(&[
+        "add-generic-password".as_ref(),
+        "-s".as_ref(),
+        service.as_ref(),
+        "-a".as_ref(),
+        account.as_ref(),
+        "-w".as_ref(),
+        " synthetic browser key ".as_ref(),
+        keychain.as_os_str()
+    ]));
     assert_eq!(
-        crypto::mac_password(&service, account).unwrap(),
+        crypto::mac_password_in(service, account, Some(&keychain)).unwrap(),
         " synthetic browser key "
     );
-    assert!(crypto::mac_password(&service, "different-account").is_err());
+    assert!(crypto::mac_password_in(service, "different-account", Some(&keychain)).is_err());
+    assert_eq!(
+        crypto::mac_password_in(service, account, Some(&keychain)).unwrap(),
+        " synthetic browser key "
+    );
     drop(cleanup);
-    assert!(crypto::mac_password(&service, account).is_err());
+    assert!(!keychain.exists());
 }
