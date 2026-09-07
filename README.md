@@ -12,9 +12,9 @@ a local dashboard, and an HTTP API.
     <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/AUR-package-1793D1.svg?variant=outline&amp;size=sm&amp;logo=archlinux&amp;mode=dark">
     <img alt="AUR: usagestat-bin" src="https://shieldcn.dev/badge/AUR-package-1793D1.svg?variant=outline&amp;size=sm&amp;logo=archlinux&amp;mode=light">
   </picture></a>
-  <a href="https://github.com/Hashim-K/homebrew-tap/blob/main/Formula/usagestat.rb"><picture>
+  <a href="https://github.com/hashimkarim/homebrew-tap/blob/main/Formula/usagestat.rb"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Homebrew-tap-FBB040.svg?variant=outline&amp;size=sm&amp;logo=homebrew&amp;mode=dark">
-    <img alt="Homebrew: hashim-k/tap/usagestat" src="https://shieldcn.dev/badge/Homebrew-tap-FBB040.svg?variant=outline&amp;size=sm&amp;logo=homebrew&amp;mode=light">
+    <img alt="Homebrew: hashimkarim/tap/usagestat" src="https://shieldcn.dev/badge/Homebrew-tap-FBB040.svg?variant=outline&amp;size=sm&amp;logo=homebrew&amp;mode=light">
   </picture></a>
   <a href="https://copr.fedorainfracloud.org/coprs/hashimkarim/usagestat/"><picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://shieldcn.dev/badge/Fedora-COPR-51A2DA.svg?variant=outline&amp;size=sm&amp;logo=fedora&amp;mode=dark">
@@ -45,7 +45,7 @@ Linux-only. Availability below was checked against release **v1.0.3**.
 | Channel | Published OS / CPU support | Package |
 | --- | --- | --- |
 | [Arch Linux / AUR](https://aur.archlinux.org/packages/usagestat-bin) | Arch Linux · x86-64 | `usagestat-bin` — release binaries |
-| [Homebrew](https://github.com/Hashim-K/homebrew-tap/blob/main/Formula/usagestat.rb) | Linux with system glibc 2.39+ · x86-64, ARM64 | `hashim-k/tap/usagestat` |
+| [Homebrew](https://github.com/hashimkarim/homebrew-tap/blob/main/Formula/usagestat.rb) | Linux with system glibc 2.39+ · x86-64, ARM64 | `hashimkarim/tap/usagestat` |
 | [Fedora COPR](https://copr.fedorainfracloud.org/coprs/hashimkarim/usagestat/) | Fedora 43, 44, 45, Rawhide · x86-64 | `usagestat` |
 | [Ubuntu PPA](https://launchpad.net/~hashimkarim/+archive/ubuntu/usagestat) | Ubuntu 24.04 LTS (Noble) · amd64 | `usagestat` |
 | [GitHub Releases](https://github.com/Hashim-K/usagestat/releases/latest) | Linux with glibc 2.39+ · x86-64, ARM64 | CLI + daemon + plugins in `.tar.gz` archives |
@@ -65,7 +65,7 @@ yay -S usagestat-bin
 With [Homebrew installed](https://docs.brew.sh/Installation):
 
 ```bash
-brew install hashim-k/tap/usagestat
+brew install hashimkarim/tap/usagestat
 ```
 
 The release binaries require **system glibc 2.39+** (for example, Ubuntu 24.04).

@@ -31,7 +31,7 @@ The package installs both binaries in `/usr/bin` and the bundled plugins in
 
 ## Homebrew on Linux
 
-The [tap formula](https://github.com/Hashim-K/homebrew-tap/blob/main/Formula/usagestat.rb)
+The [tap formula](https://github.com/hashimkarim/homebrew-tap/blob/main/Formula/usagestat.rb)
 supports Linux x86-64 and ARM64 with **system glibc 2.39 or newer**. It does not
 provide macOS binaries. Homebrew itself can run on older Linux systems, but its
 bundled glibc does not make this formula's prebuilt binaries compatible with
@@ -40,7 +40,7 @@ them. Check your system version with `getconf GNU_LIBC_VERSION`; use a
 [installing Homebrew](https://docs.brew.sh/Installation):
 
 ```bash
-brew install hashim-k/tap/usagestat
+brew install hashimkarim/tap/usagestat
 ```
 
 The fully qualified formula automatically selects the correct tap. On Homebrew
@@ -48,8 +48,8 @@ versions that ask for trust, review the linked formula and approve it. For
 noninteractive use on versions with [`brew trust`](https://docs.brew.sh/Manpage#trust-options-target-):
 
 ```bash
-brew trust --formula hashim-k/tap/usagestat
-brew install hashim-k/tap/usagestat
+brew trust --formula hashimkarim/tap/usagestat
+brew install hashimkarim/tap/usagestat
 ```
 
 This grants trust to this formula. Its binaries and plugins are installed under
@@ -204,7 +204,7 @@ and provider setup details are in the [CLI reference](cli.md).
 | --- | --- |
 | AUR helper | `yay -Syu` |
 | AUR without a helper | In the recipe checkout, run `git pull --ff-only`, review the updated `PKGBUILD` and accompanying files, then `makepkg -si`. |
-| Homebrew | `brew update`, then `brew upgrade hashim-k/tap/usagestat` |
+| Homebrew | `brew update`, then `brew upgrade hashimkarim/tap/usagestat` |
 | Fedora COPR | `sudo dnf upgrade usagestat` |
 | Ubuntu PPA | `sudo apt update`, then `sudo apt install --only-upgrade usagestat` |
 | Manual / source | Repeat the download or build/install steps for the new release, replacing both binaries and refreshing bundled plugins. |
@@ -227,7 +227,7 @@ For a manually started daemon, stop its foreground process instead.
 | Channel | Remove the package |
 | --- | --- |
 | AUR | `sudo pacman -R usagestat-bin` |
-| Homebrew | `brew uninstall hashim-k/tap/usagestat` |
+| Homebrew | `brew uninstall hashimkarim/tap/usagestat` |
 | Fedora COPR | `sudo dnf remove usagestat` |
 | Ubuntu PPA | `sudo apt remove usagestat` |
 
@@ -250,7 +250,7 @@ Keep a shared tap or repository if you use it for other packages. After removing
 its last package, these optional commands remove the channel configuration:
 
 ```bash
-brew untap hashim-k/tap
+brew untap hashimkarim/tap
 sudo dnf copr remove hashimkarim/usagestat
 sudo add-apt-repository --remove ppa:hashimkarim/usagestat
 sudo apt update

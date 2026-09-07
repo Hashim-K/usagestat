@@ -25,7 +25,7 @@ Set these **repository secrets** on `Hashim-K/usagestat`:
 | Secret | Value |
 | --- | --- |
 | `AUR_SSH_PRIVATE_KEY` | Unencrypted SSH private key registered to the AUR maintainer of `usagestat-bin`. |
-| `HOMEBREW_SSH_PRIVATE_KEY` | Unencrypted SSH private key whose public key is a **write-enabled deploy key** on `Hashim-K/homebrew-tap`. |
+| `HOMEBREW_SSH_PRIVATE_KEY` | Unencrypted SSH private key whose public key is a **write-enabled deploy key** on `hashimkarim/homebrew-tap`. |
 | `COPR_CONFIG` | Complete COPR API configuration, including the `[copr-cli]` section, login, token, and username. |
 | `PPA_GPG_PRIVATE_KEY` | ASCII-armored private signing key registered to the Launchpad PPA uploader. |
 | `PPA_GPG_PASSPHRASE` | Signing-key passphrase, if the exported key is protected; otherwise omit. |
@@ -35,7 +35,7 @@ Set these **repository variables**:
 | Variable | Value |
 | --- | --- |
 | `AUR_SSH_KNOWN_HOSTS` | Verified `aur.archlinux.org` SSH known-hosts entry. Strict host verification stays enabled. |
-| `HOMEBREW_TAP_REPOSITORY` | `Hashim-K/homebrew-tap` (GitHub `OWNER/REPOSITORY`, without a URL prefix or `.git` suffix). |
+| `HOMEBREW_TAP_REPOSITORY` | `hashimkarim/homebrew-tap` (GitHub `OWNER/REPOSITORY`, without a URL prefix or `.git` suffix). |
 | `PPA_GPG_FINGERPRINT` | Full fingerprint of the imported Launchpad signing key. |
 
 Create new AUR SSH and Launchpad OpenPGP keys alongside existing account keys;
@@ -193,20 +193,20 @@ A separate source-build `usagestat` AUR package should wait until the CLI crate 
 
 ## Homebrew
 
-The existing tap is `github.com/Hashim-K/homebrew-tap`. Automated publishing reads
+The existing tap is `github.com/hashimkarim/homebrew-tap`. Automated publishing reads
 its destination from the `HOMEBREW_TAP_REPOSITORY` repository variable, which the
 workflow passes into the publishing script. Set it before enabling publication:
 
 ```bash
 gh variable set HOMEBREW_TAP_REPOSITORY --repo Hashim-K/usagestat \
-  --body Hashim-K/homebrew-tap
+  --body hashimkarim/homebrew-tap
 ```
 
 The credential check and publishing script both require this variable; there is
 no hardcoded fallback. Local publication also needs it exported in the environment.
 Dry runs validate the recipe and binaries without a tap variable or publishing key.
 When using linux-deploy doctor, use its default `homebrew.tap_source: "variable"`
-with `homebrew.tap` set to `Hashim-K/homebrew-tap`.
+with `homebrew.tap` set to `hashimkarim/homebrew-tap`.
 
 For manual publishing, copy `packaging/homebrew/Formula/usagestat.rb` to
 `Formula/usagestat.rb`.
