@@ -1,0 +1,41 @@
+name: Rehearse staged npm installation
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: Same-repository Release run containing usagestat-npm-packages
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  install:
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025]
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: usagestat-npm-packages
+          path: target/npm-packages
+          run-id: ${{ inputs.run_id }}
+          github-token: ${{ github.token }}
+      - run: python tools/portability/npm_install.py target/npm-packages/npm-packed.json

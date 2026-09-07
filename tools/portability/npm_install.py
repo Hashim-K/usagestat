@@ -128,7 +128,10 @@ def check(packed: Path, temp_dir: Path | None = None, *, expect_doctor: bool = T
         # Windows .cmd smoke command, with a fixture-owned prefix and --version.
         if os.name == 'nt':
             shim = prefix / 'usagestat.cmd'
-            execute([os.environ.get('COMSPEC', r'C:\Windows\System32\cmd.exe'), '/d', '/s', '/c', f'""{shim}" --version"'])
+            cmd = os.environ.get('COMSPEC', r'C:\Windows\System32\cmd.exe')
+            # Python's list quoting targets the C runtime; cmd.exe has its own
+            # /s /c grammar. Pass this fixed fixture-only command line unchanged.
+            execute(f'"{cmd}" /d /s /c ""{shim}" --version"')
         else: execute([str(prefix / 'bin/usagestat'), '--version'])
         result['checks'].append('installed-cli-daemon-versions-resources-validation-and-npm-shims')
 
